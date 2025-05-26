@@ -40,6 +40,51 @@ import transformers
 from jinja2 import BaseLoader, Environment, StrictUndefined
 from loguru import logger as eval_logger
 
+def hash_string(string: str) -> str:
+    return hashlib.sha256(string.encode("utf-8")).hexdigest()
+
+def handle_arg_string(arg):
+    if arg.lower() == "true":
+        return True
+    elif arg.lower() == "false":
+        return False
+    elif arg.isnumeric():
+        return int(arg)
+    try:
+        return float(arg)
+    except ValueError:
+        return arg
+
+def simple_parse_args_string(args_string):
+    """
+    Parses something like
+        args1=val1,arg2=val2
+    Into a dictionary
+    """
+    args_string = args_string.strip()
+    if not args_string:
+        return {}
+    arg_list = [arg for arg in args_string.split(",") if arg]
+    args_dict = {k: handle_arg_string(v) for k, v in [arg.split("=") for arg in arg_list]}
+    return args_dict
+
+def sanitize_model_name(model_name: str, full_path: bool = False) -> str:
+    """
+    Given the model name, returns a sanitized version of it.
+    """
+    if full_path:
+        return re.sub(r"[\"<>:/\|\\?\*\[\]]+", "__", model_name)
+    else:
+        parts = model_name.split("/")
+        last_two = "/".join(parts[-2:]) if len(parts) > 1 else parts[-1]  # accommondate for models that are in Hugging Face Hub format like lmms-lab/llava-onevision-qwen2-0.5b
+        return re.sub(r"[\"<>:/\|\\?\*\[\]]+", "__", last_two)
+
+def sanitize_task_name(task_name: str) -> str:
+    """
+    Given the task name, returns a sanitized version of it.
+    """
+    return re.sub(r"\W", "_", task_name)
+
 def ignore_constructor(loader, node):
     return node
 

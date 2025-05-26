@@ -14,6 +14,10 @@ from loguru import logger as eval_logger
 from accelerate import Accelerator
 from accelerate.utils import InitProcessGroupKwargs
 
+from embodied_eval.tasks import TaskManager
+from embodied_eval.utils import (
+    simple_parse_args_string
+)
 
 def parse_eval_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
@@ -31,14 +35,24 @@ def parse_eval_args() -> argparse.Namespace:
         default="",
         help="String arguments for model, e.g. `pretrained=EleutherAI/pythia-160m,dtype=float32`",
     )
-
+    parser.add_argument(
+        "--include_path",
+        type=str,
+        default=None,
+        help="Additional path to include if there are external tasks to include.",
+    )
     parser.add_argument(
         "--verbosity",
         type=str,
         default="INFO",
         help="Log error when tasks are not registered.",
     )
-
+    parser.add_argument(
+        "--hf_hub_log_args",
+        type=str,
+        default="",
+        help="Comma separated string arguments passed to Hugging Face Hub's log function, e.g. `hub_results_org=EleutherAI,hub_repo_name=lm-eval-results`",
+    )
     parser.add_argument(
         "--trust_remote_code",
         action="store_true",
@@ -86,7 +100,7 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None):
 
     for args in args_list:
         try:
-            results, samples = evaluate(args)
+            results, samples = cli_evaluate_single(args)
             results_list.append(results)
             accelerator.wait_for_everyone()
 
@@ -107,9 +121,23 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None):
             if "groups" in results:
                 print(make_table(results, "groups"))
 
-def evaluate(args: argparse.Namespace):
+def cli_evaluate_single(args: argparse.Namespace):
     selected_task_list = args.tasks.split(",") if args.tasks else None
 
+    if args.include_path is not None:
+        eval_logger.info(f"Including path: {args.include_path}")
+    task_manager = TaskManager(args.verbosity, include_path=args.include_path, model_name=args.model)
+
+    # update the evaluation tracker args with the output path and the HF token
+    if args.output_path:
+        args.hf_hub_log_args += f",output_path={args.output_path}"
+    if os.environ.get("HF_TOKEN", None):
+        args.hf_hub_log_args += f",token={os.environ.get('HF_TOKEN')}"
+
+    evaluation_tracker_args = simple_parse_args_string(args.hf_hub_log_args)
+    eval_logger.info(f"Evaluation tracker args: {evaluation_tracker_args}")
+
+    evaluation_tracker = EvaluationTracker(**evaluation_tracker_args)
 
 if __name__ == "__main__":
     cli_evaluate()
