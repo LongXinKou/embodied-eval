@@ -16,6 +16,7 @@ from accelerate import Accelerator
 from accelerate.utils import InitProcessGroupKwargs
 
 from embodied_eval import evaluator, utils
+from embodied_eval.evaluator import request_caching_arg_to_dict
 from embodied_eval.tasks import TaskManager
 from embodied_eval.utils import (
     simple_parse_args_string
@@ -50,6 +51,21 @@ def parse_eval_args() -> argparse.Namespace:
         type=float,
         default=None,
         help="Limit the number of examples per task. " "If <1, limit is a percentage of the total number of examples.",
+    )
+    parser.add_argument(
+        "--use_cache",
+        "-c",
+        type=str,
+        default=None,
+        metavar="DIR",
+        help="A path to a sqlite db file for caching model responses. `None` if not caching.",
+    )
+    parser.add_argument(
+        "--cache_requests",
+        type=str,
+        default=None,
+        choices=["true", "refresh", "delete"],
+        help="Speed up evaluation by caching the building of dataset requests. `None` if not caching.",
     )
     parser.add_argument(
         "--log_samples",
@@ -253,6 +269,38 @@ def cli_evaluate_single(args: argparse.Namespace):
                 )
 
     eval_logger.info(f"Selected Tasks: {task_names}")
+    request_caching_args = request_caching_arg_to_dict(cache_requests=args.cache_requests)
+    datetime_str = utils.get_datetime_str(timezone=args.timezone)
+
+    results = evaluator.simple_evaluate(
+        model=args.model,
+        model_args=args.model_args,
+        tasks=task_names,
+        num_fewshot=args.num_fewshot,
+        batch_size=args.batch_size,
+        max_batch_size=args.max_batch_size,
+        device=args.device,
+        use_cache=args.use_cache,
+        limit=args.limit,
+        check_integrity=args.check_integrity,
+        write_out=args.write_out,
+        log_samples=args.log_samples,
+        evaluation_tracker=evaluation_tracker,
+        system_instruction=args.system_instruction,
+        apply_chat_template=args.apply_chat_template,
+        fewshot_as_multiturn=args.fewshot_as_multiturn,
+        gen_kwargs=args.gen_kwargs,
+        task_manager=task_manager,
+        verbosity=args.verbosity,
+        predict_only=args.predict_only,
+        random_seed=args.seed[0],
+        numpy_random_seed=args.seed[1],
+        torch_random_seed=args.seed[2],
+        fewshot_random_seed=args.seed[3],
+        cli_args=args,
+        datetime_str=datetime_str,
+        **request_caching_args,
+    )
 
 if __name__ == "__main__":
     cli_evaluate()

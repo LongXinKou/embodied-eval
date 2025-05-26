@@ -10,6 +10,8 @@ from loguru import logger as eval_logger
 
 from embodied_eval import utils
 
+from embodied_eval.api.task import ConfigurableTask, Task
+
 class TaskManager:
     def __init__(
         self,
@@ -268,3 +270,93 @@ class TaskManager:
                         self.logger.debug(f"File {f} in {root} could not be loaded as a task or group")
 
         return tasks_and_groups
+
+def _check_duplicates(task_dict: dict) -> List[str]:
+    """helper function solely used in validating get_task_dict output.
+    Takes the output of lmms_eval.evaluator_utils.get_subtask_list and
+    returns a list of all leaf subtasks contained within, and errors if any such leaf subtasks are
+    "oversubscribed" to several disjoint groups.
+    """
+    subtask_names = []
+    for key, value in task_dict.items():
+        subtask_names.extend(value)
+
+    duplicate_tasks = {task_name for task_name in subtask_names if subtask_names.count(task_name) > 1}
+
+    # locate the potentially problematic groups that seem to 'compete' for constituent subtasks
+    competing_groups = [group for group in task_dict.keys() if len(set(task_dict[group]).intersection(duplicate_tasks)) > 0]
+
+    if len(duplicate_tasks) > 0:
+        raise ValueError(
+            f"Found 1 or more tasks while trying to call get_task_dict() that were members of more than 1 called group: {list(duplicate_tasks)}. Offending groups: {competing_groups}. Please call groups which overlap their constituent tasks in separate evaluation runs."
+        )
+
+def get_task_dict(
+    task_name_list: Union[str, List[Union[str, Dict, Task]]],
+    task_manager: Optional[TaskManager] = None,
+):
+    """Creates a dictionary of task objects from either a name of task, config, or prepared Task object.
+
+    :param task_name_list: List[Union[str, Dict, Task]]
+        Name of model or LM object, see lmms_eval.models.get_model
+    :param task_manager: TaskManager = None
+        A TaskManager object that stores indexed tasks. If not set,
+        task_manager will load one. This should be set by the user
+        if there are additional paths that want to be included
+        via `include_path`
+
+    :return
+        Dictionary of task objects
+    """
+
+    task_name_from_string_dict = {}
+    task_name_from_config_dict = {}
+    task_name_from_object_dict = {}
+
+    if isinstance(task_name_list, str):
+        task_name_list = [task_name_list]
+    elif isinstance(task_name_list, list):
+        if not all([isinstance(task, (str, dict, Task)) for task in task_name_list]):
+            raise TypeError("Expected all list items to be of types 'str', 'dict', or 'Task', but at least one entry did not match.")
+    else:
+        raise TypeError(f"Expected a 'str' or 'list' but received {type(task_name_list)}.")
+
+    string_task_name_list = [task for task in task_name_list if isinstance(task, str)]
+    others_task_name_list = [task for task in task_name_list if not isinstance(task, str)]
+    if len(string_task_name_list) > 0:
+        if task_manager is None:
+            task_manager = TaskManager()
+
+        task_name_from_string_dict = task_manager.load_task_or_group(
+            string_task_name_list,
+        )
+
+    for task_element in others_task_name_list:
+        if isinstance(task_element, dict):
+            task_name_from_config_dict = {
+                **task_name_from_config_dict,
+                **task_manager.load_config(config=task_element),
+            }
+
+        elif isinstance(task_element, Task):
+            task_name_from_object_dict = {
+                **task_name_from_object_dict,
+                get_task_name_from_object(task_element): task_element,
+            }
+
+    if not set(task_name_from_string_dict.keys()).isdisjoint(set(task_name_from_object_dict.keys())):
+        raise ValueError
+
+    final_task_dict = {
+        **task_name_from_string_dict,
+        **task_name_from_config_dict,
+        **task_name_from_object_dict,
+    }
+
+    # behavior can get odd if one tries to invoke several groups that "compete" for the same task.
+    # (notably, because one could request several num_fewshot values at once in GroupConfig overrides for the subtask
+    # and we'd be unsure which to use and report.)
+    # we explicitly check and error in this case.
+    _check_duplicates(get_subtask_list(final_task_dict))
+
+    return final_task_dict

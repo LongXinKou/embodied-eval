@@ -107,6 +107,15 @@ def sanitize_task_name(task_name: str) -> str:
     """
     return re.sub(r"\W", "_", task_name)
 
+def get_datetime_str(timezone="Asia/Shanghai"):
+    """
+    Gets the current datetime in China Standard Time (UTC+8) as a string.
+    """
+    tz = pytz.timezone(timezone)
+    utc_now = datetime.datetime.now(datetime.timezone.utc)
+    local_time = utc_now.astimezone(tz)
+    return local_time.strftime("%Y%m%d_%H%M%S")
+
 def ignore_constructor(loader, node):
     return node
 
