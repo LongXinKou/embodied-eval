@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="Python 3.12" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.12" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="Remote Python 3.10.16 (sftp://klx@172.28.102.11:22/home/klx/anaconda3/envs/embodied-eval/bin/python3.10)" project-jdk-type="Python SDK" />
 </project>

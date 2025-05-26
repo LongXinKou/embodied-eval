@@ -1,0 +1,205 @@
+# credit to https://github.com/EleutherAI/lm-evaluation-harness
+import collections
+import inspect
+import logging
+import os
+from functools import partial
+from typing import Dict, List, Mapping, Optional, Union
+
+from loguru import logger as eval_logger
+
+from embodied_eval import utils
+
+class TaskManager:
+    def __init__(
+        self,
+        verbosity="INFO",
+        include_path: Optional[Union[str, List]] = None,
+        include_defaults: bool = True,
+        model_name: Optional[str] = None,
+    ) -> None:
+        self.verbosity = verbosity
+        self.include_path = include_path
+        self.logger = eval_logger
+        self.model_name = model_name
+
+        self._task_index = self.initialize_tasks(include_path=include_path, include_defaults=include_defaults)
+        self._all_tasks = sorted(list(self._task_index.keys()))
+
+        self._all_groups = sorted([x for x in self._all_tasks if self._task_index[x]["type"] == "group"])
+        self._all_subtasks = sorted([x for x in self._all_tasks if self._task_index[x]["type"] == "task"])
+        self._all_tags = sorted([x for x in self._all_tasks if self._task_index[x]["type"] == "tag"])
+
+        self.task_group_map = collections.defaultdict(list)
+
+    def initialize_tasks(
+            self,
+            include_path: Optional[Union[str, List]] = None,
+            include_defaults: bool = True,
+    ):
+        """Creates a dictionary of tasks index.
+
+        :param include_path: Union[str, List] = None
+            An additional path to be searched for tasks recursively.
+            Can provide more than one such path as a list.
+        :param include_defaults: bool = True
+            If set to false, default tasks (those in lmms_eval/tasks/) are not indexed.
+        :return
+            Dictionary of task names as key and task metadata
+        """
+        if include_defaults:
+            all_paths = [os.path.dirname(os.path.abspath(__file__)) + "/"]
+        else:
+            all_paths = []
+        if include_path is not None:
+            if isinstance(include_path, str):
+                include_path = [include_path]
+            all_paths.extend(include_path)
+
+        task_index = {}
+        for task_dir in all_paths:
+            tasks = self._get_task_and_group(task_dir)
+            task_index = {**tasks, **task_index}
+
+        return task_index
+
+    @property
+    def all_tasks(self):
+        return self._all_tasks
+
+    @property
+    def all_groups(self):
+        return self._all_groups
+
+    @property
+    def all_subtasks(self):
+        return self._all_subtasks
+
+    @property
+    def all_tags(self):
+        return self._all_tags
+
+    @property
+    def task_index(self):
+        return self._task_index
+
+    def _config_is_task(self, config) -> bool:
+        if ("task" in config) and isinstance(config["task"], str):
+            return True
+        return False
+
+    def _config_is_group(self, config) -> bool:
+        if ("task" in config) and isinstance(config["task"], list):
+            return True
+        return False
+
+    def _config_is_python_task(self, config) -> bool:
+        if "class" in config:
+            return True
+        return False
+
+    def _get_task_and_group(self, task_dir: str):
+        """
+        Creates a dictionary of tasks index with the following metadata,
+        - `type`, that can be either `task`, `python_task`, `group` or `tags`.
+            `task` refer to regular task configs, `python_task` are special
+            yaml files that only consists of `task` and `class` parameters.
+            `group` are group configs. `tags` are labels that can be assigned
+            to tasks to assist in sorting and calling tasks of certain themes.
+        - `yaml_path`, path to the yaml file. If the entry is a `group` that
+            was configured through a task config, the yaml_path will be -1
+            and all subtasks will be listed in `task` (see below)
+        - `task`, reserved for entries with `type` as `group`. This will list
+            all subtasks. When a group config is created (as opposed to task
+            config having `group` parameter set), this will be set to -1 to
+            avoid recursive indexing. The whole list of subtasks will be loaded
+            at evaluation.
+
+        :param task_dir: str
+            A directory to check for tasks
+
+        :return
+            Dictionary of task names as key and task metadata
+        """
+        # TODO: remove group in next release
+        print_info = True
+        ignore_dirs = [
+            "__pycache__",
+            ".ipynb_checkpoints",
+        ]
+        tasks_and_groups = collections.defaultdict()
+        for root, dirs, file_list in os.walk(task_dir):
+            dirs[:] = [d for d in dirs if d not in ignore_dirs]
+            for f in file_list:
+                if f.endswith(".yaml"):
+                    yaml_path = os.path.join(root, f)
+                    config = utils.load_yaml_config(yaml_path, mode="simple")
+                    if self._config_is_python_task(config):
+                        # This is a python class config
+                        tasks_and_groups[config["task"]] = {
+                            "type": "python_task",
+                            "yaml_path": yaml_path,
+                        }
+                    elif self._config_is_group(config):
+                        # This is a group config
+                        tasks_and_groups[config["group"]] = {
+                            "type": "group",
+                            "task": -1,  # This signals that
+                            # we don't need to know
+                            # the task list for indexing
+                            # as it can be loaded
+                            # when called.
+                            "yaml_path": yaml_path,
+                        }
+
+                        # # Registered the level 1 tasks from a group config
+                        # for config in config["task"]:
+                        #     if isinstance(config, dict) and self._config_is_task(config):
+                        #         task = config["task"]
+                        #         tasks_and_groups[task] = {
+                        #             "type": "task",
+                        #             "yaml_path": yaml_path,
+                        #             }
+
+                    elif self._config_is_task(config):
+                        # This is a task config
+                        task = config["task"]
+                        tasks_and_groups[task] = {
+                            "type": "task",
+                            "yaml_path": yaml_path,
+                        }
+
+                        # TODO: remove group in next release
+                        for attr in ["tag", "group"]:
+                            if attr in config:
+                                if attr == "group" and print_info:
+                                    self.logger.debug(
+                                        "`group` and `group_alias` keys in tasks' configs will no longer be used in the next release of lmms-eval. "
+                                        "`tag` will be used to allow to call a collection of tasks just like `group`. "
+                                        "`group` will be removed in order to not cause confusion with the new ConfigurableGroup "
+                                        "which will be the offical way to create groups with addition of group-wide configuations."
+                                    )
+                                    print_info = False
+                                    # attr = "tag"
+
+                                attr_list = config[attr]
+                                if isinstance(attr_list, str):
+                                    attr_list = [attr_list]
+
+                                for tag in attr_list:
+                                    if tag not in tasks_and_groups:
+                                        tasks_and_groups[tag] = {
+                                            "type": "tag",
+                                            "task": [task],
+                                            "yaml_path": -1,
+                                        }
+                                    elif tasks_and_groups[tag]["type"] != "tag":
+                                        self.logger.warning(
+                                            f"The tag {tag} is already registered as a group, this tag will not be registered. " "This may affect tasks you want to call.")
+                                        break
+                                    else:
+                                        tasks_and_groups[tag]["task"].append(task)
+                    else:
+                        self.logger.debug(f"File {f} in {root} could not be loaded as a task or group")
+
+        return tasks_and_groups
