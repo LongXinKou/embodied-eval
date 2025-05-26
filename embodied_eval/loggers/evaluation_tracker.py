@@ -114,8 +114,8 @@ class EvaluationTracker:
         Args:
             output_path (str): Path to save the results. If not provided, the results won't be saved.
             hub_results_org (str): The Hugging Face organization to push the results to. If not provided, the results will be pushed to the owner of the Hugging Face token.
-            hub_repo_name (str): The name of the Hugging Face repository to push the results to. If not provided, the results will be pushed to `lm-eval-results`.
-            details_repo_name (str): The name of the Hugging Face repository to push the details to. If not provided, the results will be pushed to `lm-eval-results`.
+            hub_repo_name (str): The name of the Hugging Face repository to push the results to. If not provided, the results will be pushed to `embodied-eval-results`.
+            details_repo_name (str): The name of the Hugging Face repository to push the details to. If not provided, the results will be pushed to `embodied-eval-results`.
             result_repo_name (str): The name of the Hugging Face repository to push the results to. If not provided, the results will not be pushed and will be found in the details_hub_repo.
             push_results_to_hub (bool): Whether to push the results to the Hugging Face hub.
             push_samples_to_hub (bool): Whether to push the samples to the Hugging Face hub.
@@ -142,4 +142,16 @@ class EvaluationTracker:
         if self.api and hub_results_org == "" and (push_results_to_hub or push_samples_to_hub):
             hub_results_org = self.api.whoami()["name"]
             eval_logger.warning(f"hub_results_org was not specified. Results will be pushed to '{hub_results_org}'.")
+        if hub_repo_name == "":
+            details_repo_name = details_repo_name if details_repo_name != "" else "embodied-eval-results"
+            results_repo_name = results_repo_name if results_repo_name != "" else details_repo_name
+        else:
+            details_repo_name = hub_repo_name
+            results_repo_name = hub_repo_name
+            eval_logger.warning(
+                "hub_repo_name was specified. Both details and results will be pushed to the same repository. Using hub_repo_name is no longer recommended, details_repo_name and results_repo_name should be used instead.")
 
+        self.details_repo = f"{hub_results_org}/{details_repo_name}"
+        self.details_repo_private = f"{hub_results_org}/{details_repo_name}-private"
+        self.results_repo = f"{hub_results_org}/{results_repo_name}"
+        self.results_repo_private = f"{hub_results_org}/{results_repo_name}-private"

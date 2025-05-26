@@ -18,6 +18,7 @@ from embodied_eval.tasks import TaskManager
 from embodied_eval.utils import (
     simple_parse_args_string
 )
+from embodied_eval.loggers import EvaluationTracker, WandbLogger
 
 def parse_eval_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
