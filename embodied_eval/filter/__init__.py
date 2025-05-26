@@ -1,3 +1,5 @@
+from embodied_eval.api.filter import FilterEnsemble
+
 from . import extraction, selection, transformation
 
 FILTER_REGISTRY = {
