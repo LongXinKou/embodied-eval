@@ -1,5 +1,6 @@
 import argparse
 import datetime
+import importlib
 import json
 import yaml
 import os
@@ -14,6 +15,7 @@ from loguru import logger as eval_logger
 from accelerate import Accelerator
 from accelerate.utils import InitProcessGroupKwargs
 
+from embodied_eval import evaluator, utils
 from embodied_eval.tasks import TaskManager
 from embodied_eval.utils import (
     simple_parse_args_string
@@ -29,12 +31,49 @@ def parse_eval_args() -> argparse.Namespace:
     parser.add_argument(
         "--tasks",
         default=None,
-        help="To get full list of tasks, use the command lmms-eval --tasks list",
+        help="To get full list of tasks, use the command embodied-eval --tasks list",
     )
     parser.add_argument(
         "--model_args",
         default="",
         help="String arguments for model, e.g. `pretrained=EleutherAI/pythia-160m,dtype=float32`",
+    )
+    parser.add_argument(
+        "--output_path",
+        default=None,
+        type=str,
+        metavar="= [dir/file.jsonl] [DIR]",
+        help="The path to the output file where the result metrics will be saved. If the path is a directory and log_samples is true, the results will be saved in the directory. Else the parent directory will be used.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=float,
+        default=None,
+        help="Limit the number of examples per task. " "If <1, limit is a percentage of the total number of examples.",
+    )
+    parser.add_argument(
+        "--log_samples",
+        action="store_true",
+        default=False,
+        help="If True, write out all model outputs and documents for per-sample measurement and post-hoc analysis",
+    )
+    parser.add_argument(
+        "--wandb_log_samples",
+        action="store_true",
+        default=False,
+        help="If True, write out all model outputs and documents for per-sample measurement and post-hoc analysis to Weights and Biases",
+    )
+    parser.add_argument(
+        "--apply_chat_template",
+        action="store_true",
+        default=False,
+        help="If True, applies the chat template to the prompt",
+    )
+    parser.add_argument(
+        "--fewshot_as_multiturn",
+        action="store_true",
+        default=False,
+        help="If True, uses the fewshot as a multi-turn conversation",
     )
     parser.add_argument(
         "--include_path",
@@ -53,6 +92,13 @@ def parse_eval_args() -> argparse.Namespace:
         type=str,
         default="",
         help="Comma separated string arguments passed to Hugging Face Hub's log function, e.g. `hub_results_org=EleutherAI,hub_repo_name=lm-eval-results`",
+    )
+    parser.add_argument(
+        "--predict_only",
+        "-x",
+        action="store_true",
+        default=False,
+        help="Use with --log_samples. Only model outputs will be saved and metrics will not be evaluated.",
     )
     parser.add_argument(
         "--trust_remote_code",
@@ -139,6 +185,74 @@ def cli_evaluate_single(args: argparse.Namespace):
     eval_logger.info(f"Evaluation tracker args: {evaluation_tracker_args}")
 
     evaluation_tracker = EvaluationTracker(**evaluation_tracker_args)
+
+    if args.predict_only:
+        args.log_samples = True
+    if (args.log_samples or args.predict_only) and not args.output_path:
+        raise ValueError("Specify --output_path if providing --log_samples or --predict_only")
+
+    if args.fewshot_as_multiturn and args.apply_chat_template is False:
+        raise ValueError("If fewshot_as_multiturn is set, apply_chat_template must be set to True.")
+
+    if args.include_path is not None:
+        eval_logger.info(f"Including path: {args.include_path}")
+
+    if "push_samples_to_hub" in evaluation_tracker_args and not args.log_samples:
+        eval_logger.warning("Pushing samples to the Hub requires --log_samples to be set. Samples will not be pushed to the Hub.")
+
+    if args.limit:
+        eval_logger.warning(" --limit SHOULD ONLY BE USED FOR TESTING." "REAL METRICS SHOULD NOT BE COMPUTED USING LIMIT.")
+
+    if os.environ.get("LMMS_EVAL_PLUGINS", None):
+        args.include_path = [args.include_path] if args.include_path else []
+        for plugin in os.environ["LMMS_EVAL_PLUGINS"].split(","):
+            package_tasks_location = importlib.util.find_spec(f"{plugin}.tasks").submodule_search_locations[0]
+            args.include_path.append(package_tasks_location)
+
+    if args.tasks is None:
+        eval_logger.error("Need to specify task to evaluate.")
+        sys.exit()
+    elif args.tasks == "list":
+        eval_logger.info("Available Tasks:\n - {}".format(f"\n - ".join(sorted(task_manager.list_all_tasks()))))
+        sys.exit()
+    elif args.tasks == "list_groups":
+        eval_logger.info(task_manager.list_all_tasks(list_subtasks=False, list_tags=False))
+        sys.exit()
+    elif args.tasks == "list_tags":
+        eval_logger.info(task_manager.list_all_tasks(list_groups=False, list_subtasks=False))
+        sys.exit()
+    elif args.tasks == "list_subtasks":
+        eval_logger.info(task_manager.list_all_tasks(list_groups=False, list_tags=False))
+        sys.exit()
+    else:
+        if os.path.isdir(args.tasks):
+            import glob
+
+            task_names = []
+            yaml_path = os.path.join(args.tasks, "*.yaml")
+            for yaml_file in glob.glob(yaml_path):
+                config = utils.load_yaml_config(yaml_file)
+                task_names.append(config)
+        else:
+            task_list = args.tasks.split(",")
+            task_names = task_manager.match_tasks(task_list)
+            for task in [task for task in task_list if task not in task_names]:
+                if os.path.isfile(task):
+                    config = utils.load_yaml_config(task)
+                    task_names.append(config)
+            task_missing = [task for task in task_list if
+                            task not in task_names and "*" not in task]  # we don't want errors if a wildcard ("*") task name was used
+
+            if task_missing:
+                missing = ", ".join(task_missing)
+                eval_logger.error(
+                    f"Tasks were not found: {missing}\n" f"{utils.SPACING}Try `embodied-eval --tasks list` for list of available tasks",
+                )
+                raise ValueError(
+                    f"Tasks not found: {missing}. Try `embodied-eval --tasks {{list_groups,list_subtasks,list_tags,list}}` to list out all available names for task groupings; only (sub)tasks; tags; or all of the above, or pass '--verbosity DEBUG' to troubleshoot task registration issues."
+                )
+
+    eval_logger.info(f"Selected Tasks: {task_names}")
 
 if __name__ == "__main__":
     cli_evaluate()

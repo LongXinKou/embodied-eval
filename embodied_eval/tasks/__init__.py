@@ -83,6 +83,71 @@ class TaskManager:
     def task_index(self):
         return self._task_index
 
+    def list_all_tasks(self, list_groups=True, list_tags=True, list_subtasks=True) -> str:
+        from pytablewriter import MarkdownTableWriter
+
+        def sanitize_path(path):
+            # don't print full path if we are within the embodied_eval/tasks dir !
+            # if we aren't though, provide the full path.
+            if "embodied_eval/tasks/" in path:
+                return "embodied_eval/tasks/" + path.split("embodied_eval/tasks/")[-1]
+            else:
+                return path
+
+        group_table = MarkdownTableWriter()
+        group_table.headers = ["Group", "Config Location"]
+        gt_values = []
+        for g in self.all_groups:
+            path = self.task_index[g]["yaml_path"]
+            if path == -1:
+                path = "---"
+            else:
+                path = sanitize_path(path)
+            gt_values.append([g, path])
+        group_table.value_matrix = gt_values
+
+        tag_table = MarkdownTableWriter()
+        tag_table.headers = ["Tag"]
+        tag_table.value_matrix = [[t] for t in self.all_tags]
+
+        subtask_table = MarkdownTableWriter()
+        subtask_table.headers = ["Task", "Config Location", "Output Type"]
+        st_values = []
+        for t in self.all_subtasks:
+            path = self.task_index[t]["yaml_path"]
+
+            output_type = ""
+
+            # read the yaml file to determine the output type
+            if path != -1:
+                config = utils.load_yaml_config(path, mode="simple")
+                if "output_type" in config:
+                    output_type = config["output_type"]
+                elif "include" in config:  # if no output type, check if there is an include with an output type
+                    include_path = path.split("/")[:-1] + config["include"]
+                    include_config = utils.load_yaml_config(include_path, mode="simple")
+                    if "output_type" in include_config:
+                        output_type = include_config["output_type"]
+
+            if path == -1:
+                path = "---"
+            else:
+                path = sanitize_path(path)
+            st_values.append([t, path, output_type])
+        subtask_table.value_matrix = st_values
+
+        result = "\n"
+        if list_groups:
+            result += group_table.dumps() + "\n\n"
+        if list_tags:
+            result += tag_table.dumps() + "\n\n"
+        if list_subtasks:
+            result += subtask_table.dumps() + "\n\n"
+        return result
+
+    def match_tasks(self, task_list):
+        return utils.pattern_match(task_list, self.all_tasks)
+
     def _config_is_task(self, config) -> bool:
         if ("task" in config) and isinstance(config["task"], str):
             return True

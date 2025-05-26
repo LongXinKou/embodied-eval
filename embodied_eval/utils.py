@@ -40,6 +40,12 @@ import transformers
 from jinja2 import BaseLoader, Environment, StrictUndefined
 from loguru import logger as eval_logger
 
+SPACING = " " * 47
+HIGHER_IS_BETTER_SYMBOLS = {
+    True: "↑",
+    False: "↓",
+}
+
 def hash_string(string: str) -> str:
     return hashlib.sha256(string.encode("utf-8")).hexdigest()
 
@@ -67,6 +73,22 @@ def simple_parse_args_string(args_string):
     arg_list = [arg for arg in args_string.split(",") if arg]
     args_dict = {k: handle_arg_string(v) for k, v in [arg.split("=") for arg in arg_list]}
     return args_dict
+
+# Returns a list containing all values of the source_list that
+# match at least one of the patterns
+def pattern_match(patterns, source_list):
+    if type(patterns) == str:
+        patterns = [patterns]
+
+    task_names = set()
+    for pattern in patterns:
+        try:
+            for matching in fnmatch.filter(source_list, pattern):
+                task_names.add(matching)
+        except Exception as e:
+            eval_logger.error(f"Error matching pattern {pattern}: {e}")
+    return sorted(list(task_names))
+
 
 def sanitize_model_name(model_name: str, full_path: bool = False) -> str:
     """
