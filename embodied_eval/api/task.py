@@ -206,3 +206,54 @@ class Task(abc.ABC):
         self._config = TaskConfig({**config}) if config else TaskConfig()
 
         self._filters = [build_filter_ensemble("none", [["take_first", None]])]
+
+    def download(self, data_dir=None, cache_dir=None, download_mode=None) -> None:
+        """Downloads and returns the task dataset.
+        Override this method to download the dataset from a custom API.
+
+        :param data_dir: str
+            Stores the path to a local folder containing the `Task`'s data files.
+            Use this to specify the path to manually downloaded data (usually when
+            the dataset is not publicly accessible).
+        :param cache_dir: str
+            The directory to read/write the `Task` dataset. This follows the
+            HuggingFace `datasets` API with the default cache directory located at:
+                `~/.cache/huggingface/datasets`
+            NOTE: You can change the cache location globally for a given process
+            by setting the shell environment variable, `HF_DATASETS_CACHE`,
+            to another directory:
+                `export HF_DATASETS_CACHE="/path/to/another/directory"`
+        :param download_mode: datasets.DownloadMode
+            How to treat pre-existing `Task` downloads and data.
+            - `datasets.DownloadMode.REUSE_DATASET_IF_EXISTS`
+                Reuse download and reuse dataset.
+            - `datasets.DownloadMode.REUSE_CACHE_IF_EXISTS`
+                Reuse download with fresh dataset.
+            - `datasets.DownloadMode.FORCE_REDOWNLOAD`
+                Fresh download and fresh dataset.
+        """
+        self.dataset = datasets.load_dataset(
+            path=self.DATASET_PATH,
+            name=self.DATASET_NAME,
+            data_dir=data_dir,
+            cache_dir=cache_dir,
+            download_mode=download_mode,
+        )
+        self.dataset_no_image = datasets.load_dataset(
+            path=self.DATASET_PATH,
+            name=self.DATASET_NAME,
+            data_dir=data_dir,
+            cache_dir=cache_dir,
+            download_mode=download_mode,
+        )
+        for doc_name in self.dataset_no_image:
+            remove_cols = []
+            features = self.dataset_no_image[doc_name].features
+            # If it is an Image instance or a Sequence of Image instance. Remove it
+            for feature in features:
+                if isinstance(features[feature], Image):
+                    remove_cols.append(feature)
+                elif isinstance(features[feature], Sequence) and isinstance(features[feature].feature, Image):
+                    remove_cols.append(feature)
+            for remove_col in remove_cols:
+                self.dataset_no_image[doc_name] = self.dataset_no_image[doc_name].remove_columns(remove_col)
