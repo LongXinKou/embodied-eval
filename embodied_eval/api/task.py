@@ -37,6 +37,7 @@ from tenacity import retry, stop_after_attempt, stop_after_delay, wait_fixed
 from tqdm import tqdm
 
 from embodied_eval.filters import build_filter_ensemble
+from embodied_eval import utils
 
 @dataclass
 class TaskConfig(dict):
@@ -84,7 +85,7 @@ class TaskConfig(dict):
 
     metadata: Union[str, list] = None  # by default, not used in the code. allows for users to pass arbitrary info to tasks
 
-    lmms_eval_specific_kwargs: dict = None
+    embodied_eval_specific_kwargs: dict = None
     model_specific_generation_kwargs: dict = None
     model_specific_target_kwargs: dict = None
 
@@ -257,3 +258,131 @@ class Task(abc.ABC):
                     remove_cols.append(feature)
             for remove_col in remove_cols:
                 self.dataset_no_image[doc_name] = self.dataset_no_image[doc_name].remove_columns(remove_col)
+
+    @property
+    def config(self):
+        """Returns the TaskConfig associated with this class."""
+        return self._config
+
+    @abc.abstractmethod
+    def has_training_docs(self):
+        """Whether the task has a training set"""
+        pass
+
+    @abc.abstractmethod
+    def has_validation_docs(self):
+        """Whether the task has a validation set"""
+        pass
+
+    @abc.abstractmethod
+    def has_test_docs(self):
+        """Whether the task has a test set"""
+        pass
+
+    def training_docs(self):
+        """
+        :return: Iterable[obj]
+            A iterable of any object, that doc_to_text can handle
+        """
+        return []
+
+    def validation_docs(self):
+        """
+        :return: Iterable[obj]
+            A iterable of any object, that doc_to_text can handle
+        """
+        return []
+
+    def test_docs(self):
+        """
+        :return: Iterable[obj]
+            A iterable of any object, that doc_to_text can handle
+        """
+        return []
+
+    def fewshot_docs(self):
+        """
+        :return: Iterable[obj]
+            A iterable of any object, that doc_to_text can handle
+        """
+        if self.has_training_docs():
+            return self.training_docs()
+        elif self.has_validation_docs():
+            return self.validation_docs()
+        else:
+            if self.config.num_fewshot is not None:
+                eval_logger.warning(
+                    "has_training_docs and has_validation_docs are False" ", using test_docs as fewshot_docs but this is not recommended.")
+            return self.test_docs()
+
+    def _process_doc(self, doc):
+        """
+        Override this to process (detokenize, strip, replace, etc.) individual
+        documents. This can be used in a map over documents of a data split.
+        E.g. `map(self._process_doc, self.dataset["validation"])`
+
+        :return: dict
+            The processed version of the specified `doc`.
+        """
+        return doc
+
+    @property
+    def instances(self):
+        """After calling `task.build_all_requests()`, tasks
+        maintain a list of the dataset instances which will be evaluated.
+        """
+        return self._instances
+
+    def fewshot_examples(self, k, rnd):
+        if self._training_docs is None:
+            self._training_docs = list(self.training_docs())
+
+        return rnd.sample(self._training_docs, k)
+
+    def doc_to_decontamination_query(self, doc) -> None:
+        print("Override doc_to_decontamination_query with document specific decontamination query.")
+        assert False
+
+    @abc.abstractmethod
+    def doc_to_text(self, doc):
+        pass
+
+    @abc.abstractmethod
+    def doc_to_target(self, doc):
+        pass
+
+    # @profile
+    def build_all_requests(
+            self,
+            *,
+            limit: Union[int, None] = None,
+            rank: int = 0,
+            world_size: int = 1,
+            cache_requests: bool = False,
+            rewrite_requests_cache: bool = False,
+            system_instruction: Optional[str] = None,
+            apply_chat_template: bool = False,
+            fewshot_as_multiturn: bool = False,
+            chat_template: Optional[Callable] = None,
+            tokenizer_name: str = "",
+    ) -> None:
+        """Build a set of Instances for a task, and store them in task.instances"""
+        if self.has_test_docs():
+            docs = self.test_docs()
+            split = self.config.test_split
+        elif self.has_validation_docs():
+            docs = self.validation_docs()
+            split = self.config.validation_split
+        else:
+            assert False, f"Task dataset (path={self.DATASET_PATH}, name={self.DATASET_NAME}) must have valid or test docs!"
+
+        # used with caching
+        og_limit = limit
+
+        cache_key = f"requests-{self._config.task}-{self.config.num_fewshot}shot-rank{rank}-world_size{world_size}"
+        cache_key += "-chat_template" if apply_chat_template else ""
+        cache_key += "-fewshot_as_multiturn" if fewshot_as_multiturn else ""
+        cache_key += f"-system_prompt_hash{utils.hash_string(system_instruction)}" if system_instruction is not None else ""
+        cache_key += f"-tokenizer{tokenizer_name}"
+
+        cached_instances = load_from_cache(file_name=cache_key)
