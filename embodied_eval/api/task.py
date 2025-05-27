@@ -388,3 +388,15 @@ class Task(abc.ABC):
         cache_key += f"-tokenizer{tokenizer_name}"
 
         cached_instances = load_from_cache(file_name=cache_key)
+
+        if cache_requests and cached_instances and not rewrite_requests_cache:
+            cached_instances = cached_instances[:limit]
+
+            flattened_instances = [instance for instance_group in cached_instances for instance in instance_group]
+
+            self._instances = flattened_instances
+            return
+
+        eval_logger.info(f"Building contexts for {self.config.task} on rank {rank}...")
+
+        
