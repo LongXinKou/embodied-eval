@@ -180,3 +180,11 @@ def load_yaml_config(yaml_path=None, yaml_config=None, yaml_dir=None, mode="full
         final_yaml_config.update(yaml_config)
         return final_yaml_config
     return yaml_config
+
+def create_iterator(raw_iterator, rank, world_size, limit=None):
+    """
+    Method for creating a (potentially) sliced and limited
+    iterator from a raw document iterator. Used for splitting data
+    among ranks in multigpu setting or only pulling a sample of documents
+    """
+    return islice(raw_iterator, rank, limit, world_size)

@@ -399,4 +399,68 @@ class Task(abc.ABC):
 
         eval_logger.info(f"Building contexts for {self.config.task} on rank {rank}...")
 
-        
+        instances = []
+
+        # process all documents when caching is specified for simplicity
+        if cache_requests and (not cached_instances or rewrite_requests_cache) and limit is not None:
+            limit = None
+
+        doc_id_docs = utils.create_iterator(enumerate(self.eval_docs_no_media), rank=rank,
+                                            limit=int(limit) if limit else None, world_size=world_size)
+        doc_iterator_for_counting = itertools.islice(range(len(self.test_docs())), rank, limit,
+                                                     world_size) if self.has_test_docs() else itertools.islice(
+            range(len(self.validation_docs())), rank, limit, world_size)
+
+        num_docs = sum(1 for _ in doc_iterator_for_counting)
+
+        for doc_id, doc in tqdm(
+                doc_id_docs,
+                total=num_docs,
+        ):
+            # sample fewshot context #TODO: need to offset doc_id by rank now!
+            fewshot_ctx = self.fewshot_context(
+                doc,
+                0 if self.config.num_fewshot is None else self.config.num_fewshot,
+                system_instruction,
+                apply_chat_template,
+                fewshot_as_multiturn,
+                chat_template,
+            )
+
+    @utils.positional_deprecated
+    def fewshot_context(
+            self,
+            doc_id,
+            num_fewshot,
+            split,
+            rnd=random.Random(1234),
+            description=None,
+    ):
+        """Returns a fewshot context string that is made up of a prepended description
+        (if provided), the `num_fewshot` number of examples, and an appended prompt example.
+
+        :param doc_id: int
+            The document id as returned from training_docs, validation_docs, or test_docs.
+        :param num_fewshot: int
+            The number of fewshot examples to provide in the returned context string.
+        :param split: str
+            The split of the document to retrieve from the dataset
+        :param rnd: random.Random
+            The pseudo-random number generator used to randomly sample examples.
+            WARNING: This is currently a required arg although it's optionalized with a default `None`.
+        :param description: str
+            The task's description that will be prepended to the fewshot examples.
+        :returns: str
+            The fewshot context.
+        """
+        assert rnd is not None, "A `random.Random` generator argument must be provided to `rnd`"
+
+        description = description if description else ""
+        doc = self.dataset_no_image[split][doc_id]
+
+        if num_fewshot == 0:
+            labeled_examples = ""
+        else:
+            # for sets with no training docs, draw from other set *but ensure no overlap with current doc*
+            if self.has_training_docs():
+                fewshotex = self.fewshot_examples(k=num_fewshot, rnd=rnd)
