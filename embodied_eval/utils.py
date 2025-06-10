@@ -34,9 +34,33 @@ class Collator:
         self.group_fn = lambda x: group_fn(x[1])  # first index are enumerated indices
         self.reorder_indices: List = []
         self.size = len(arr)
-        self.arr_with_indices: Iterable[Any] = tuple(enumerate(arr))  # [indices, (arr)]
+        self.arr_with_indices: Iterable[Any] = tuple(enumerate(arr))  # (index, arr[index])
         if self.grouping is True:
             self.group_by_index()
+
+    def __len__(self):
+        return self.size
+    
+    def get_original(self, newarr: List) -> List:
+        """
+        Restores the original order of elements from the reordered list.
+
+        Parameters:
+        - newarr (List): The reordered array.
+
+        Returns:
+        List: The array with elements restored to their original order.
+        """
+        res = [None] * self.size
+        cov = [False] * self.size
+
+        for ind, v in zip(self.reorder_indices, newarr):
+            res[ind] = v
+            cov[ind] = True
+
+        assert all(cov)
+
+        return res
 
     def group_by_index(self) -> None:
         self.arr_with_indices = self.group(self.arr_with_indices, fn=self.group_fn, values=False)
@@ -99,39 +123,11 @@ class Collator:
         """
         Reorders the elements in the array based on the sorting function.
 
-        Parameters:
-        - arr (Union[List, Tuple[Tuple[int, Any], ...]]): The array or iterable to be reordered.
-
-        Yields:
-        List: Yields reordered elements one by one.
+        Yields reordered elements one by one.
         """
         arr = sorted(arr, key=lambda x: self.fn(x[1]))
         self.reorder_indices.extend([x[0] for x in arr])
         yield from [x[1] for x in arr]
-
-    def get_original(self, newarr: List) -> List:
-        """
-        Restores the original order of elements from the reordered list.
-
-        Parameters:
-        - newarr (List): The reordered array.
-
-        Returns:
-        List: The array with elements restored to their original order.
-        """
-        res = [None] * self.size
-        cov = [False] * self.size
-
-        for ind, v in zip(self.reorder_indices, newarr):
-            res[ind] = v
-            cov[ind] = True
-
-        assert all(cov)
-
-        return res
-
-    def __len__(self):
-        return self.size
 
     @staticmethod
     def get_chunks(_iter, n: int = 0, fn=None):
@@ -171,3 +167,4 @@ class Collator:
 
         if arr:
             yield arr
+
