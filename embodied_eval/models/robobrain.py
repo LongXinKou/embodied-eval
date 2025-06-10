@@ -1,12 +1,16 @@
 import torch
+import numpy as np
 
 from tqdm import tqdm
+from PIL import Image
+
 from accelerate import Accelerator, DistributedType
 from transformers import AutoProcessor, AutoModelForPreTraining
 from typing import List, Optional, Tuple, Union
 from loguru import logger as eval_logger
 
 from embodied_eval.api.registry import register_model
+from embodied_eval.utils import Collator
 
 @register_model("robobrain")
 class RoboBrain(BaseAPIModel):
@@ -72,9 +76,123 @@ class RoboBrain(BaseAPIModel):
         else:
             return self._model
 
-    def generate_until(self, requests) -> List[str]:
+    def generate_until(self, requests: List[Instance]) -> List[str]:
         """Generate text until a stopping sequence."""
         res = []
 
-        num_iters = len(requests) // self.batch_size if len(requests) % self.batch_size == 0 else len(requests) // self.batch_size + 1
-        pbar = tqdm(total=num_iters, disable=(self.rank != 0), desc="RoboBrain Responding")
+        def _sort_by_context_length(x):
+            # Sort by context length for better batching
+            toks = self.processor.tokenizer.encode(x[0])
+            return -len(toks), x[0]
+
+        # Initialize the Collator to group requests and sort them by context length
+        collator = Collator([req.args for req in requests], _sort_by_context_length, grouping=True)
+        # Create batches from the sorted and grouped requests
+        batches = collator.get_batched(n=self.batch_size, batch_fn=None)
+
+        # Determine the number of iterations required to process all requests
+        num_batches = len(requests) // self.batch_size if len(requests) % self.batch_size == 0 else len(requests) // self.batch_size + 1
+        progress_bar = tqdm(total=num_batches, disable=(self.rank != 0), desc="RoboBrain Responding")
+
+        for batch in batches:
+
+            gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
+
+            # Get generation parameters
+            do_sample = gen_kwargs.get("do_sample", self.do_sample)
+            temperature = gen_kwargs.get("temperature", self.temperature)
+            max_new_tokens = gen_kwargs.get("max_new_tokens", 256)
+
+            # Define a stopping sequence if specified
+            until = [self.processor.tokenizer.decode(self.eot_token_id)]
+            if "until" in gen_kwargs:
+                until_from_kwargs = gen_kwargs.pop("until")
+                if isinstance(until_from_kwargs, str):
+                    until = [until_from_kwargs]
+                elif isinstance(until_from_kwargs, list):
+                    until = until_from_kwargs
+
+            contexts = list(contexts)
+
+            batched_messages = []
+            for i, context in enumerate(contexts):
+                if self.system_prompt:
+                    message = [{"role": "system", "content": self.system_prompt}]
+                else:
+                    message = []
+
+                content_parts = []
+                content_parts.append({"type": "text", "text": context})
+                if i < len(visual_list) and visual_list[i] is not None:
+                    visual = visual_list[i]
+                    if isinstance(visual, str) and (visual.startswith("http")):
+                        content_parts.append({"type": "image", "url": visual})
+                    elif isinstance(visual, (str, Image.Image, np.ndarray)):
+                        content_parts.append({"type": "image", "image": self._process_image(visual)})
+
+                message.append({"role": "user", "content": content_parts})
+                batched_messages.append(message)
+
+            # Process all messages in batch
+            inputs_list = []
+            input_lengths = []
+            for message in batched_messages:
+                inputs = self.processor.apply_chat_template(
+                    message, add_generation_prompt=True, tokenize=True, return_dict=True, return_tensors="pt"
+                )
+                # Add attention mask if it's missing
+                inputs["attention_mask"] = inputs.get('attention_mask',
+                                                      inputs['input_ids'].ne(self.processor.tokenizer.pad_token_id))
+
+                inputs_list.append(inputs)
+                input_lengths.append(inputs['input_ids'].shape[1])
+
+            batch_inputs = {}
+            for key in inputs_list[0].keys():
+                batch_inputs[key] = torch.cat([inp[key] for inp in inputs_list], dim=0)
+            batch_inputs = {k: v.to(self.device) for k, v in batch_inputs.items()}
+
+            # Generate output
+            output = self.model.generate(
+                **batch_inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=do_sample,
+                temperature=temperature
+            )
+
+            generated_ids_trimmed = [out_ids[in_ids:] for in_ids, out_ids in zip(input_lengths, output)]
+            answers = self.processor.batch_decode(
+                generated_ids_trimmed,
+                skip_special_tokens=True,
+            )
+
+            # Apply stopping sequence if needed
+            for i, ans in enumerate(answers):
+                for term in until:
+                    if len(term) > 0:
+                        ans = ans.split(term)[0]
+                answers[i] = ans
+
+            # Cache result
+            for ans, context in zip(answers, contexts):
+                res.append(ans)
+                progress_bar.update(1)
+
+        # Reorder results to match original order
+        res = collator.get_original(res)
+        progress_bar.close()
+        return res
+
+    def _process_image(self, image):
+        """Process image for model input."""
+        if isinstance(image, str):
+            try:
+                return Image.open(image).convert("RGB")
+            except Exception as e:
+                eval_logger.error(f"Error loading image {image}: {e}")
+                return None
+        elif isinstance(image, Image.Image):
+            return image.convert("RGB")
+        elif isinstance(image, np.ndarray):
+            return Image.fromarray(image).convert("RGB")
+        return None
