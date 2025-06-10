@@ -49,4 +49,26 @@ class TaskManager:
                 }
         return tasks
 
-    
+    def _get_config(self, name):
+        if name not in self.task_index:
+            raise ValueError("Task {} not found".format(name))
+        yaml_path = self.task_index[name]["yaml_path"]
+        return load_yaml_config(yaml_path)
+
+    def _load_individual_task(
+            self,
+            name: Optional[str] = None,
+    ):
+        def _load_task(config, task):
+            task_object = ConfigurableTask(config=config, model_name=self.model_name)
+            return {task: task_object}
+
+        if isinstance(name, str):
+            task_config = self._get_config(name)
+            return _load_task(task_config, task=name)
+
+    def load_tasks(self, task_list):
+        if isinstance(task_list, str):
+            task_list = [task_list]
+        all_loaded_tasks = dict(collections.ChainMap(*map(self._load_individual_task, task_list)))
+        return all_loaded_tasks
