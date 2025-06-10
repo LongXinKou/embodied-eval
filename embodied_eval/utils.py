@@ -14,9 +14,9 @@ from typing import (
     Union,
 )
 
+
 def ignore_constructor(loader, node):
     return node
-
 
 def import_function(loader, node):
     function_name = loader.construct_scalar(node)
@@ -40,7 +40,7 @@ def load_yaml_config(yaml_path=None, mode="func"):
 
     with open(yaml_path, "rb") as file:
         yaml_config = yaml.full_load(file)
-    # TODO Group
+    # TODO Group/Include
     return yaml_config
 
 
