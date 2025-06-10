@@ -10,6 +10,7 @@ from typing import List, Optional, Tuple, Union
 from loguru import logger as eval_logger
 
 from embodied_eval.api.registry import register_model
+from embodied_eval.api.model import BaseAPIModel
 from embodied_eval.utils import Collator
 
 @register_model("robobrain")
@@ -76,7 +77,7 @@ class RoboBrain(BaseAPIModel):
         else:
             return self._model
 
-    def generate_until(self, requests: List[Instance]) -> List[str]:
+    def generate_until(self, requests) -> List[str]:
         """Generate text until a stopping sequence."""
         res = []
 
@@ -95,7 +96,7 @@ class RoboBrain(BaseAPIModel):
         progress_bar = tqdm(total=num_batches, disable=(self.rank != 0), desc="RoboBrain Responding")
 
         for batch in batches:
-
+            # TODO request + batch
             gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
 
             # Get generation parameters

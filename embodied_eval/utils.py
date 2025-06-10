@@ -1,4 +1,8 @@
 import collections
+import yaml
+import os
+
+import importlib.util
 from typing import (
     Any,
     Callable,
@@ -9,6 +13,35 @@ from typing import (
     Tuple,
     Union,
 )
+
+def ignore_constructor(loader, node):
+    return node
+
+
+def import_function(loader, node):
+    function_name = loader.construct_scalar(node)
+    yaml_path = os.path.dirname(loader.name)
+
+    *module_name, function_name = function_name.split(".")
+    if isinstance(module_name, list):
+        module_name = ".".join(module_name)
+    module_path = os.path.normpath(os.path.join(yaml_path, "{}.py".format(module_name)))
+
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    function = getattr(module, function_name)
+    return function
+
+def load_yaml_config(yaml_path=None, mode="func"):
+    constructor_fn = import_function if mode == "func" else ignore_constructor
+    yaml.add_constructor("!function", constructor_fn)
+
+    with open(yaml_path, "rb") as file:
+        yaml_config = yaml.full_load(file)
+    # TODO Group
+    return yaml_config
 
 
 class Collator:
