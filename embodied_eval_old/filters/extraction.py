@@ -5,7 +5,7 @@ import unicodedata
 
 import openai
 
-from embodied_eval.api.filter import Filter
+from embodied_eval_old.api.filter import Filter
 
 class WhitespaceFilter(Filter):
     """ """

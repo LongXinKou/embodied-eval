@@ -1,4 +1,4 @@
-from embodied_eval.api.filter import FilterEnsemble
+from embodied_eval_old.api.filter import FilterEnsemble
 
 from . import extraction, selection, transformation
 

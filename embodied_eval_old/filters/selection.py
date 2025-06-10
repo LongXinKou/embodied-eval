@@ -1,7 +1,7 @@
 from collections import Counter
 
-from embodied_eval.api.filter import Filter
-from embodied_eval.api.registry import register_filter
+from embodied_eval_old.api.filter import Filter
+from embodied_eval_old.api.registry import register_filter
 
 # TODO: implement "arg_max" filter. either it should take in an arbitrary "scoring"/reward function
 # that takes an input and returns a scalar and then should select the max reward,

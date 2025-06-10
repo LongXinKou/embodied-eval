@@ -1,4 +1,4 @@
-from embodied_eval.api.filter import Filter
+from embodied_eval_old.api.filter import Filter
 
 class LowercaseFilter(Filter):
     def __init__(self) -> None:

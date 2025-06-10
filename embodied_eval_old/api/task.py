@@ -36,9 +36,9 @@ from PIL import ImageFile
 from tenacity import retry, stop_after_attempt, stop_after_delay, wait_fixed
 from tqdm import tqdm
 
-from embodied_eval import utils
-from embodied_eval.caching.cache import load_from_cache, save_to_cache
-from embodied_eval.filters import build_filter_ensemble
+from embodied_eval_old import utils
+from embodied_eval_old.caching.cache import load_from_cache, save_to_cache
+from embodied_eval_old.filters import build_filter_ensemble
 
 
 @dataclass

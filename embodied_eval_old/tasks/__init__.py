@@ -8,9 +8,9 @@ from typing import Dict, List, Mapping, Optional, Union
 
 from loguru import logger as eval_logger
 
-from embodied_eval import utils
+from embodied_eval_old import utils
 
-from embodied_eval.api.task import ConfigurableTask, Task
+from embodied_eval_old.api.task import ConfigurableTask, Task
 
 class TaskManager:
     def __init__(

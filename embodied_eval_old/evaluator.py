@@ -14,9 +14,9 @@ from datasets import Image, Sequence
 from loguru import logger as eval_logger
 from tqdm import tqdm
 
-from embodied_eval.tasks import TaskManager, get_task_dict
-from embodied_eval.loggers.evaluation_tracker import EvaluationTracker
-from embodied_eval.utils import (
+from embodied_eval_old.tasks import TaskManager, get_task_dict
+from embodied_eval_old.loggers.evaluation_tracker import EvaluationTracker
+from embodied_eval_old.utils import (
     create_iterator,
     get_datetime_str,
     get_git_commit_hash,

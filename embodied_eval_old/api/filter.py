@@ -3,7 +3,7 @@ from typing import List
 
 from datasets import Dataset
 
-from embodied_eval.api.instance import Instance
+from embodied_eval_old.api.instance import Instance
 
 class Filter:
     """

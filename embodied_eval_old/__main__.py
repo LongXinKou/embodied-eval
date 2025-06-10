@@ -15,13 +15,13 @@ from loguru import logger as eval_logger
 from accelerate import Accelerator
 from accelerate.utils import InitProcessGroupKwargs
 
-from embodied_eval import evaluator, utils
-from embodied_eval.evaluator import request_caching_arg_to_dict
-from embodied_eval.tasks import TaskManager
-from embodied_eval.utils import (
+from embodied_eval_old import evaluator, utils
+from embodied_eval_old.evaluator import request_caching_arg_to_dict
+from embodied_eval_old.tasks import TaskManager
+from embodied_eval_old.utils import (
     simple_parse_args_string
 )
-from embodied_eval.loggers import EvaluationTracker, WandbLogger
+from embodied_eval_old.loggers import EvaluationTracker, WandbLogger
 
 def parse_eval_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)

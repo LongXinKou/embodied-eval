@@ -4,8 +4,8 @@ import pickle
 
 import dill
 
-from embodied_eval.loggers.utils import _handle_non_serializable, is_serializable
-from embodied_eval.utils import eval_logger
+from embodied_eval_old.loggers.utils import _handle_non_serializable, is_serializable
+from embodied_eval_old.utils import eval_logger
 
 MODULE_DIR = os.path.dirname(os.path.realpath(__file__))
 
