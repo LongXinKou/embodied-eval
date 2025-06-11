@@ -84,10 +84,13 @@ def cli_evaluate_single(args):
 
     datetime_str = get_datetime_str(timezone=args.timezone)
 
-    results = evaluator.simple_evaluate(
-        model=args.model,
-        model_args=args.model_args,
-    )
+    # Model
+
+    # Inference
+    prediction = SimpleInference()
+
+    # Evaluate
+    results = SimpleEvaluate()
 
 
 if __name__ == "__main__":
