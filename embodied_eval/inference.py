@@ -7,7 +7,7 @@ from loguru import logger as eval_logger
 from tqdm import tqdm
 from typing import List, Optional, Union
 
-from embodied_eval.tasks import TaskManager, get_task_dict
+from embodied_eval.tasks import TaskManager, get_task_dict, get_task_list
 from embodied_eval.utils import (
     positional_deprecated
 )
@@ -42,4 +42,10 @@ def Inference(
     model,
     task_dict,
 ):
+    # TODO TaskOutput是什么？为什么要定义
+    eval_tasks = get_task_list(task_dict)
+
+    for task_output in eval_tasks:
+        limit = get_sample_size(task, limit)
+
 

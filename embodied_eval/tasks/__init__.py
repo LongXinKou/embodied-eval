@@ -123,6 +123,22 @@ class Task(abc.ABC):
             else:
                 self.dataset = load_from_disk(dataset_path=self.dataset_path)
 
+# ======================= Task Output =======================
+class TaskOutput:
+    def __init__(
+            self,
+            task=None,
+            task_name=None,
+    ):
+        self.task = task
+        self.task_name = task_name
+
+    @classmethod
+    def from_taskdict(cls, task_name: str, task):
+        return cls(
+            task=task,
+            task_name=task_name
+        )
 
 # ======================= Task Manager =======================
 
@@ -214,3 +230,11 @@ def get_task_dict(
     }
 
     return final_task_dict
+
+def get_task_list(task_dict: dict):
+    outputs = []
+    for task_name, task_obj in task_dict.items():
+        task_output = TaskOutput.from_taskdict(task_name, task_obj)
+        outputs.append(task_output)
+
+    return outputs
