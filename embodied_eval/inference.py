@@ -28,5 +28,3 @@ def SimpleInference(
 
     assert tasks != [], "No tasks specified, or no tasks found. Please verify the task names."
 
-    if model_args is None:
-        model_args = ""

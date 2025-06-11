@@ -13,6 +13,7 @@ from loguru import logger as eval_logger
 from transformers import AutoProcessor, Qwen2VLForConditionalGeneration
 from tqdm import tqdm
 
+from embodied_eval.inference import SimpleInference
 from embodied_eval.tasks import TaskManager
 from embodied_eval.utils import (
     get_datetime_str
@@ -85,6 +86,11 @@ def cli_evaluate_single(args):
     datetime_str = get_datetime_str(timezone=args.timezone)
 
     # Model
+    if isinstance(args.model, str):
+        if args.model_args is None:
+            model_args = ""
+
+        model =
 
     # Inference
     prediction = SimpleInference()

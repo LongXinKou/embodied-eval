@@ -10,7 +10,7 @@ from typing import List, Optional, Tuple, Union
 from loguru import logger as eval_logger
 
 from embodied_eval.api.registry import register_model
-from embodied_eval.api.model import BaseAPIModel
+from embodied_eval.models import BaseAPIModel
 from embodied_eval.utils import Collator
 
 @register_model("robobrain")
