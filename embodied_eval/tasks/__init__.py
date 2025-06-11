@@ -90,8 +90,6 @@ class TaskConfig(dict):
     dataset_path: str = None
     dataset_name: str = None
     load_from_disk: bool = False
-    training_split: str = None
-    validation_split: str = None
     test_split: str = None
     full_docs: bool = False
 
@@ -131,14 +129,25 @@ class Task(abc.ABC):
         self.dataset_name = getattr(self.config, 'dataset_name', None)
         self.load_from_disk = getattr(self.config, 'load_from_disk', False)
 
-    #     TODO model_name / metric
+        # TODO model_name / metric config
 
         self.prepare_dataset()
+
+        self.task_docs = self.test_docs()
+        self.features = list(self.task_docs.features.keys())
+
+        # TODO MC
 
     @property
     def config(self):
         """Returns the TaskConfig associated with this class."""
         return self._config
+
+    def test_docs(self) -> Dataset:
+        if self.config.test_split is not None:
+            return self.dataset[self.config.test_split]
+        else:
+            assert False, f"Task dataset (path={self.dataset_path}, name={self.dataset_name}) must have test docs!"
 
     def prepare_dataset(self):
         if not self.load_from_disk:
