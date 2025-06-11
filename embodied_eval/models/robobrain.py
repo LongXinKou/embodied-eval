@@ -26,6 +26,7 @@ class RoboBrain(BaseAPIModel):
             lora_id: Optional[str] = None,
             device: Optional[str] = "cuda",
             device_map: Optional[str] = "cuda",
+            max_length: Optional[int] = 2048,
             batch_size: Optional[Union[int, str]] = 1,
             temperature: float = 0.7,
             do_sample: bool = True,
@@ -68,6 +69,8 @@ class RoboBrain(BaseAPIModel):
                 raise
 
         # Store configuration
+        self._config = self._model.config
+        self._max_length = max_length if getattr(self._config, "max_length", None) else self._config.max_length
         self.batch_size_per_gpu = int(batch_size)
         self.temperature = temperature
         self.do_sample = do_sample
@@ -83,6 +86,9 @@ class RoboBrain(BaseAPIModel):
             self._rank = 0
             self._world_size = 1
 
+    @property
+    def config(self):
+        return self._config
 
     @property
     def processor(self):
@@ -94,6 +100,23 @@ class RoboBrain(BaseAPIModel):
             return self.accelerator.unwrap_model(self._model)
         else:
             return self._model
+
+    @property
+    def eot_token_id(self):
+        # Use the model's EOS token ID
+        return self.processor.tokenizer.eos_token_id
+
+    @property
+    def max_length(self):
+        return self._max_length
+
+    @property
+    def batch_size(self):
+        return self.batch_size_per_gpu
+
+    @property
+    def device(self):
+        return self._device
 
     def generate_until(self, requests) -> List[str]:
         """Generate text until a stopping sequence."""
