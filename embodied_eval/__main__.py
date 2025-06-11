@@ -77,7 +77,7 @@ def cli_evaluate(args):
         results_list.append(None)
 
 def cli_evaluate_single(args):
-    task_manager = TaskManager(model_name=args.model)
+    task_manager = TaskManager()
 
     task_list = args.tasks.split(",")
     task_names = task_manager.match_tasks(task_list)

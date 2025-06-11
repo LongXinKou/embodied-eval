@@ -129,10 +129,7 @@ class Task(abc.ABC):
 class TaskManager:
     def __init__(
             self,
-            model_name: Optional[str] = None,
     ) -> None:
-        self.model_name = model_name
-
         self. _task_index = self.initialize_tasks(include_defaults=True)
         self._all_tasks = sorted(list(self._task_index.keys()))
         # TODO 评估单一task
