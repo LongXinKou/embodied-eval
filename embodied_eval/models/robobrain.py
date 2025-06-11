@@ -22,7 +22,7 @@ class RoboBrain(BaseAPIModel):
 
     def __init__(
             self,
-            pretrained: str = "BAAI/RoboBrain",
+            model_name_or_path: str = "BAAI/RoboBrain",
             lora_id: Optional[str] = None,
             device: Optional[str] = "cuda",
             device_map: Optional[str] = "cuda",
@@ -45,16 +45,16 @@ class RoboBrain(BaseAPIModel):
             self.device_map = device_map if device_map else device
 
         # Load model
-        eval_logger.info(f"Loading RoboBrain model from {pretrained}")
+        eval_logger.info(f"Loading RoboBrain model from {model_name_or_path}")
         self._model = AutoModelForPreTraining.from_pretrained(
-            pretrained,
+            model_name_or_path,
             torch_dtype=torch.float16,
             low_cpu_mem_usage=True,
             device_map=self.device_map
         )
 
         # Load processor
-        self._processor = AutoProcessor.from_pretrained(pretrained)
+        self._processor = AutoProcessor.from_pretrained(model_name_or_path)
 
         # Apply LoRA if specified
         if lora_id is not None:
