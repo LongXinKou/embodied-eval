@@ -133,10 +133,11 @@ class RoboBrain(BaseAPIModel):
         batches = collator.get_batched(n=self.batch_size, batch_fn=None)
 
         # Determine the number of iterations required to process all requests
-        num_batches = len(requests) // self.batch_size if len(requests) % self.batch_size == 0 else len(requests) // self.batch_size + 1
-        progress_bar = tqdm(total=num_batches, disable=(self.rank != 0), desc="RoboBrain Responding")
+        num_iters = len(requests) // self.batch_size if len(requests) % self.batch_size == 0 else len(requests) // self.batch_size + 1
+        progress_bar = tqdm(total=num_iters, disable=(self.rank != 0), desc="RoboBrain Responding")
 
         for batch in batches:
+            
             # TODO request + batch
             gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
 

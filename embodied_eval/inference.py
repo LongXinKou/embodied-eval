@@ -98,6 +98,4 @@ def Inference(
         if model.world_size > 1:
             model.accelerator.wait_for_everyone()
 
-    RANK = model.rank
-    WORLD_SIZE = model.world_size
-    ### Postprocess outputs ###
+    return eval_tasks
