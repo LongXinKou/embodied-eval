@@ -1,6 +1,11 @@
 import collections
+import datetime
+import functools
+import fnmatch
+import inspect
 import yaml
 import os
+import pytz
 import json
 
 import importlib.util
@@ -14,6 +19,7 @@ from typing import (
     Tuple,
     Union,
 )
+from loguru import logger as eval_logger
 
 
 def load_json(json_path):
@@ -221,3 +227,41 @@ class Collator:
 
         if chunk:
             yield chunk
+
+def pattern_match(patterns, source_list):
+    if type(patterns) == str:
+        patterns = [patterns]
+
+    task_names = set()
+    for pattern in patterns:
+        try:
+            for matching in fnmatch.filter(source_list, pattern):
+                task_names.add(matching)
+        except Exception as e:
+            eval_logger.error(f"Error matching pattern {pattern}: {e}")
+    return sorted(list(task_names))
+
+
+def get_datetime_str(timezone="Asia/Singapore"):
+    """
+    Gets the current datetime in UTC+8 timezone as a string.
+    """
+    # Default: UTC+8 timezone
+    tz = pytz.timezone(timezone)
+    utc_now = datetime.datetime.now(datetime.timezone.utc)
+    local_time = utc_now.astimezone(tz)
+    return local_time.strftime("%Y%m%d_%H%M%S")
+
+def positional_deprecated(fn):
+    """
+    A decorator to nudge users into passing only keyword args (`kwargs`) to the
+    wrapped function, `fn`.
+    """
+
+    @functools.wraps(fn)
+    def _wrapper(*args, **kwargs):
+        if len(args) != 1 if inspect.ismethod(fn) else 0:
+            print(f"WARNING: using {fn.__name__} with positional arguments is " "deprecated and will be disallowed in a future version of " "lmms-evaluation-harness!")
+        return fn(*args, **kwargs)
+
+    return _wrapper

@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 
 import yaml
 
-from embodied_eval.utils import load_yaml_config, load_json
+from embodied_eval.utils import load_yaml_config, load_json, pattern_match
 
 # ======================= Task Config =======================
 @dataclass
@@ -192,6 +192,9 @@ class TaskManager:
             task_list = [task_list]
         all_loaded_tasks = dict(collections.ChainMap(*map(self._load_individual_task, task_list)))
         return all_loaded_tasks
+
+    def match_tasks(self, task_list):
+        return pattern_match(task_list, self.all_tasks)
 
 def get_task_dict(
     task_name_list: Union[str, List[Union[str, Dict, Task]]],

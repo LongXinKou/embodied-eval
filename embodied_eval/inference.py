@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import torch
 import random
 import json
@@ -6,10 +7,16 @@ import os
 import time
 import numpy as np
 
+from accelerate import Accelerator
+from accelerate.utils import InitProcessGroupKwargs
 from loguru import logger as eval_logger
 from transformers import AutoProcessor, Qwen2VLForConditionalGeneration
 from tqdm import tqdm
 
+from embodied_eval.tasks import TaskManager
+from embodied_eval.utils import (
+    get_datetime_str
+)
 
 def parse_args():
     """
@@ -39,11 +46,27 @@ def parse_args():
         default=None,
         type=str,
     )
+    parser.add_argument(
+        "--timezone",
+        default="Asia/Singapore",
+        help="Timezone for datetime string, e.g. Asia/Singapore, America/New_York, America/Los_Angeles. You can check the full list via `import pytz; print(pytz.common_timezones)`",
+    )
     return parser.parse_args()
 
-def run_inference(args):
+def SimpleInference(args):
+
+    results_list = []
+
+    # initialize Accelerator
+    kwargs_handler = InitProcessGroupKwargs(timeout=datetime.timedelta(seconds=60000))
+    accelerator = Accelerator(kwargs_handlers=[kwargs_handler])
+    if accelerator.is_main_process:
+        is_main_process = True
+    else:
+        is_main_process = False
+
     try:
-        results, samples = run_inference_for_single_task(args)
+        results, samples = run_inference(args)
         results_list.append(results)
         accelerator.wait_for_everyone()
 
@@ -52,13 +75,21 @@ def run_inference(args):
             f"Error during evaluation: {e}. Please set `--verbosity=DEBUG` to get more information.")
         results_list.append(None)
 
-def run_inference_for_single_task(args):
-    task_list = args.tasks.split(",")
-    task_names = task_list # TODO
+def run_inference(args):
+    task_manager = TaskManager(model_name=args.model)
 
+    task_list = args.tasks.split(",")
+    task_names = task_manager.match_tasks(task_list)
     eval_logger.info(f"Selected Tasks: {task_names}")
+
+    datetime_str = get_datetime_str(timezone=args.timezone)
+
+    results = evaluator.simple_evaluate(
+        model=args.model,
+        model_args=args.model_args,
+    )
 
 
 if __name__ == "__main__":
     args = parse_args()
-    run_inference(args)
+    SimpleInference(args)
