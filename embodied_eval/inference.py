@@ -7,6 +7,7 @@ from loguru import logger as eval_logger
 from tqdm import tqdm
 from typing import List, Optional, Union
 
+from embodied_eval.tasks import TaskManager, get_task_dict
 from embodied_eval.utils import (
     positional_deprecated
 )
@@ -14,17 +15,31 @@ from embodied_eval.utils import (
 @positional_deprecated
 def SimpleInference(
     model,
-    model_args: Optional[Union[str, dict]] = None,
     tasks: Optional[List[Union[str, dict, object]]] = None,
-    random_seed: int = 0,
+    task_manager: Optional[TaskManager] = None,
+    seed: int = 0,
 ):
-    random.seed(random_seed)
-    np.random.seed(random_seed)
-    torch.manual_seed(random_seed)
-    eval_logger.info(f"Setting random seed to {random_seed} | \
-        Setting numpy seed to {random_seed} | \
-        Setting torch manual seed to {random_seed}s"
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    eval_logger.info(f"Setting random seed to {seed} | \
+        Setting numpy seed to {seed} | \
+        Setting torch manual seed to {seed}s"
     )
 
     assert tasks != [], "No tasks specified, or no tasks found. Please verify the task names."
+    task_dict = get_task_dict(tasks, task_manager)
+
+    result = Inference(
+        model=model,
+        task_dict=task_dict,
+    )
+
+    return result
+
+@positional_deprecated
+def Inference(
+    model,
+    task_dict,
+):
 
