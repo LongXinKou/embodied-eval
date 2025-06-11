@@ -26,7 +26,7 @@ def parse_args():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model",
+        "--model_name_or_path",
         type=str,)
     parser.add_argument(
         "--pretrained",
@@ -92,10 +92,10 @@ def cli_evaluate_single(args):
             model_args = ""
 
         model = get_model(model_name=args.model).create_from_arg_string(
-            model_args=model_args,
-            {
-                "batch_size": batch_size,
-            },
+            model_args = model_args,
+            additional_config = {
+                "batch_size": args.batch_size,
+            }
         )
 
     # Inference

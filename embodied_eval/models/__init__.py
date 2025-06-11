@@ -9,6 +9,10 @@ from embodied_eval.utils import (
 
 T = TypeVar("T", bound="BaseAPIModel")
 
+AVAILABLE_MODELS = {
+    "robobrain": "RoboBrain",
+}
+
 class BaseAPIModel(abc.ABC):
     def __init__(self) -> None:
         # set rank and world size to a single process, by default.
@@ -66,9 +70,6 @@ class BaseAPIModel(abc.ABC):
         args2 = {k: v for k, v in additional_config.items() if v is not None}
         return cls(**args, **args2)
 
-AVAILABLE_MODELS = {
-    "robobrain": "RoboBrain",
-}
 
 def get_model(model_name):
     """
