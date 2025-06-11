@@ -26,14 +26,12 @@ def parse_args():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model_name_or_path",
+        "--model",
         type=str,)
-    parser.add_argument(
-        "--pretrained",
-        type=str, )
     parser.add_argument(
         "--model_args",
         default="",
+        help="model_name_or_path=,lora_id=",
     )
     parser.add_argument(
         "--tasks",
@@ -42,7 +40,8 @@ def parse_args():
     parser.add_argument(
         '--batch_size',
         type=int,
-        default=1)
+        default=1
+    )
     parser.add_argument(
         "--output_path",
         default=None,
