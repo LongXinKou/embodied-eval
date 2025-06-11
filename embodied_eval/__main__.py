@@ -53,7 +53,7 @@ def parse_args():
     )
     return parser.parse_args()
 
-def SimpleInference(args):
+def cli_evaluate(args):
 
     results_list = []
 
@@ -66,7 +66,7 @@ def SimpleInference(args):
         is_main_process = False
 
     try:
-        results, samples = run_inference(args)
+        results, samples = cli_evaluate_single(args)
         results_list.append(results)
         accelerator.wait_for_everyone()
 
@@ -75,7 +75,7 @@ def SimpleInference(args):
             f"Error during evaluation: {e}. Please set `--verbosity=DEBUG` to get more information.")
         results_list.append(None)
 
-def run_inference(args):
+def cli_evaluate_single(args):
     task_manager = TaskManager(model_name=args.model)
 
     task_list = args.tasks.split(",")
@@ -92,4 +92,4 @@ def run_inference(args):
 
 if __name__ == "__main__":
     args = parse_args()
-    SimpleInference(args)
+    cli_evaluate(args)
