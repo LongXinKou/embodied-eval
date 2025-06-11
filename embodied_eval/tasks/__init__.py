@@ -36,6 +36,7 @@ class TaskConfig(dict):
     # Inference
     output_type: str = "generate_until"
     generation_kwargs: dict = None
+    repeats: int = 1
 
     def __getitem__(self, item):
         return getattr(self, item)
@@ -157,7 +158,7 @@ class Task(abc.ABC):
             doc_id_docs,
             total=len(self.eval_docs),
         ):
-            per_task_metadata = {"task": self.config["task"], "doc_id": doc_id, "split": self.config["eval_split"]}
+            per_task_metadata = {"task": self.config["task"], "doc_id": doc_id, "repeats": self.config.repeats, "split": self.config["eval_split"]}
             inst = self.construct_requests(doc_id=doc_id, metadata=per_task_metadata)
             if not isinstance(inst, list):
                 inst = [inst]
@@ -171,7 +172,7 @@ class Task(abc.ABC):
 
     def construct_requests(self, doc_id: int, **kwargs) -> Union[List[Instance], Instance]:
         split = kwargs.get("metadata").get("split")
-
+        # TODO MC
         if self.output_type == "generate_until":
             arguments = (copy.deepcopy(self.config.generation_kwargs), self.doc_to_visual, doc_id,
                          self.config.task, split)
