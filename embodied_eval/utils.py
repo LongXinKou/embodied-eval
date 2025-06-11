@@ -1,6 +1,7 @@
 import collections
 import yaml
 import os
+import json
 
 import importlib.util
 from typing import (
@@ -14,6 +15,19 @@ from typing import (
     Union,
 )
 
+
+def load_json(json_path):
+    if json_path.endswith('.json'):
+        with open(json_path, "r") as f:
+            return json.load(f)
+    elif json_path.endswith('.jsonl'):
+        data = []
+        with open(json_path, "r") as f:
+            for line in f:
+                data.append(json.loads(line).strip())
+        return data
+    else:
+        return None
 
 def ignore_constructor(loader, node):
     return node
