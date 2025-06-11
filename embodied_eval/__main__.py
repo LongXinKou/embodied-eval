@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from embodied_eval.inference import SimpleInference
 from embodied_eval.tasks import TaskManager
+from embodied_eval.models import get_model
 from embodied_eval.utils import (
     get_datetime_str
 )
@@ -90,7 +91,12 @@ def cli_evaluate_single(args):
         if args.model_args is None:
             model_args = ""
 
-        model =
+        model = get_model(model_name=args.model).create_from_arg_string(
+            model_args=model_args,
+            {
+                "batch_size": batch_size,
+            },
+        )
 
     # Inference
     prediction = SimpleInference()

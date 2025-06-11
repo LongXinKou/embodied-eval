@@ -1,6 +1,7 @@
 import abc
 
 from typing import List, Optional, Tuple, Type, TypeVar, Union
+from loguru import logger
 
 from embodied_eval.utils import (
     simple_parse_args_string
@@ -64,3 +65,26 @@ class BaseAPIModel(abc.ABC):
         args = simple_parse_args_string(arg_string)
         args2 = {k: v for k, v in additional_config.items() if v is not None}
         return cls(**args, **args2)
+
+AVAILABLE_MODELS = {
+    "robobrain": "RoboBrain",
+}
+
+def get_model(model_name):
+    """
+    model_name --> model_name.py --> model_class
+    """
+    if model_name not in AVAILABLE_MODELS:
+        raise ValueError(f"Model {model_name} not found in available models.")
+
+    model_class = AVAILABLE_MODELS[model_name]
+    if "." not in model_class:
+        model_class = f"embodied_eval.models.{model_name}.{model_class}"
+
+    try:
+        model_module, model_class = model_class.rsplit(".", 1)
+        module = __import__(model_module, fromlist=[model_class])
+        return getattr(module, model_class) # module.model_class
+    except Exception as e:
+        logger.error(f"Failed to import {model_class} from {model_name}: {e}")
+        raise
