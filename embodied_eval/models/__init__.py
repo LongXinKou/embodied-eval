@@ -2,6 +2,11 @@ import abc
 
 from typing import List, Optional, Tuple, Type, TypeVar, Union
 
+from embodied_eval.utils import (
+    simple_parse_args_string
+)
+
+T = TypeVar("T", bound="BaseAPIModel")
 
 class BaseAPIModel(abc.ABC):
     def __init__(self) -> None:
@@ -42,3 +47,20 @@ class BaseAPIModel(abc.ABC):
         # ensure no errors arise using API models which do
         # not support multi-device parallelism nor expect it.
         return self._world_size
+
+    @classmethod
+    def create_from_arg_string(cls: Type[T], arg_string: str, additional_config: Optional[dict] = None) -> T:
+        """
+        Creates an instance of the LMM class using the given argument string and additional config.
+
+        Parameters:
+        - arg_string: A string containing arguments in the format key1=value1,key2=value2.
+        - additional_config: Optional dictionary containing additional configuration parameters.
+
+        Returns:
+        - Instance of the LMM class.
+        """
+        additional_config = {} if additional_config is None else additional_config
+        args = simple_parse_args_string(arg_string)
+        args2 = {k: v for k, v in additional_config.items() if v is not None}
+        return cls(**args, **args2)

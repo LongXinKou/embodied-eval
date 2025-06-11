@@ -23,10 +23,14 @@ class RoboBrain(BaseAPIModel):
     def __init__(
             self,
             pretrained: str = "BAAI/RoboBrain",
+            lora_id: Optional[str] = None,
             device: Optional[str] = "cuda",
             device_map: Optional[str] = "cuda",
+            batch_size: Optional[Union[int, str]] = 1,
             temperature: float = 0.7,
             do_sample: bool = True,
+            system_prompt: Optional[str] = None,
+            **kwargs,
     ) -> None:
         super().__init__()
 
@@ -51,9 +55,23 @@ class RoboBrain(BaseAPIModel):
         # Load processor
         self._processor = AutoProcessor.from_pretrained(pretrained)
 
+        # Apply LoRA if specified
+        if lora_id is not None:
+            try:
+                from peft import PeftModel
+                eval_logger.info(f"Loading LoRA weights from {lora_id}")
+                self._processor.image_processor.image_grid_pinpoints = [[384, 384]]
+                self._model.base_model.base_model.config.image_grid_pinpoints = [[384, 384]]
+                self._model = PeftModel.from_pretrained(self._model, lora_id)
+            except ImportError:
+                eval_logger.error("Failed to import PeftModel. Please install peft to use LoRA.")
+                raise
+
         # Store configuration
+        self.batch_size_per_gpu = int(batch_size)
         self.temperature = temperature
         self.do_sample = do_sample
+        self.system_prompt = system_prompt
 
         # Set up distributed evaluation
         if accelerator.num_processes > 1:
