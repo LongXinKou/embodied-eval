@@ -5,7 +5,7 @@ import collections
 import random
 import math
 
-from datasets import load_dataset, load_from_disk, DownloadMode
+from datasets import Dataset, load_dataset, load_from_disk, DownloadMode
 from collections.abc import Callable
 from typing import Dict, List, Mapping, Optional, Union
 from dataclasses import asdict, dataclass, field
@@ -179,5 +179,6 @@ class Task(abc.ABC):
                             cur_dataset = cur_dataset[:sampling_number]
 
                         self.dataset.extend(cur_dataset)
+                self.dataset = Dataset.from_list(self.dataset)
             else:
                 self.dataset = load_from_disk(dataset_path=self.dataset_path)
