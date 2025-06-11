@@ -19,6 +19,7 @@ from typing import (
     Tuple,
     Union,
 )
+from itertools import islice
 from loguru import logger as eval_logger
 
 
@@ -276,6 +277,9 @@ def simple_parse_args_string(args_string):
     arg_list = [arg for arg in args_string.split(",") if arg]
     args_dict = {k: handle_arg_string(v) for k, v in [arg.split("=") for arg in arg_list]}
     return args_dict
+
+def create_iterator(raw_iterator, rank, world_size, limit=None):
+    return islice(raw_iterator, rank, limit, world_size)
 
 def positional_deprecated(fn):
     """

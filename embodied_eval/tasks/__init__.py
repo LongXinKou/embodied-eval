@@ -1,5 +1,6 @@
 import abc
 import os
+import copy
 import collections
 
 import random
@@ -9,10 +10,13 @@ from datasets import Dataset, load_dataset, load_from_disk, DownloadMode
 from collections.abc import Callable
 from typing import Dict, List, Mapping, Optional, Union
 from dataclasses import asdict, dataclass, field
+from loguru import logger as eval_logger
+from tqdm import tqdm
 
 import yaml
 
-from embodied_eval.utils import load_yaml_config, load_json, pattern_match
+from embodied_eval.common.instance import Instance
+from embodied_eval.utils import load_yaml_config, load_json, pattern_match, create_iterator
 
 # ======================= Task Config =======================
 @dataclass
@@ -23,7 +27,15 @@ class TaskConfig(dict):
     dataset_path: str = None
     dataset_name: str = None
     load_from_disk: bool = False
-    test_split: str = None
+    eval_split: str = None
+    # Formatting
+    doc_to_visual: Union[Callable, str] = None
+    doc_to_text: Union[Callable, str] = None
+    doc_to_target: Union[Callable, str] = None
+    doc_to_choice: Union[Callable, str, dict, list] = None
+    # Inference
+    output_type: str = "generate_until"
+    generation_kwargs: dict = None
 
     def __getitem__(self, item):
         return getattr(self, item)
@@ -60,12 +72,10 @@ class Task(abc.ABC):
         self.dataset_path = getattr(self.config, 'dataset_path', None)
         self.dataset_name = getattr(self.config, 'dataset_name', None)
         self.load_from_disk = getattr(self.config, 'load_from_disk', False)
-
-        # TODO model_name / metric config
+        self.output_type = getattr(self.config, 'output_type')
 
         self.prepare_dataset()
-        self.task_docs = self.test_docs()
-        self.features = list(self.task_docs.features.keys())
+        self._instances = None
 
         # TODO MC
 
@@ -74,11 +84,19 @@ class Task(abc.ABC):
         """Returns the TaskConfig associated with this class."""
         return self._config
 
-    def test_docs(self) -> Dataset:
-        if self.config.test_split is not None:
-            return self.dataset[self.config.test_split]
+    @property
+    def instances(self):
+        """After calling `task.build_all_requests()`, tasks
+        maintain a list of the dataset instances which will be evaluated.
+        """
+        return self._instances
+
+    @property
+    def eval_docs(self) -> Dataset:
+        if self.config.eval_split is not None:
+            return self.dataset[self.config.eval_split]
         else:
-            assert False, f"Task dataset (path={self.dataset_path}, name={self.dataset_name}) must have test docs!"
+            assert False, f"Task dataset (path={self.dataset_path}, name={self.dataset_name}) must have eval docs!"
 
     def prepare_dataset(self):
         if not self.load_from_disk:
@@ -123,12 +141,50 @@ class Task(abc.ABC):
             else:
                 self.dataset = load_from_disk(dataset_path=self.dataset_path)
 
+    def build_all_requests(
+        self,
+        limit: Union[int, None] = None,
+        rank: int = 0,
+        world_size: int = 1,
+    ):
+        """Build a set of Instances for a task, and store them in task.instances"""
+        eval_logger.info(f"Building contexts for {self.config.task} on rank {rank}...")
+
+        instances = []
+
+        doc_id_docs = create_iterator(enumerate(self.eval_docs), rank=rank, limit=limit, world_size=world_size)
+        for doc_id, doc in tqdm(
+            doc_id_docs,
+            total=len(self.eval_docs),
+        ):
+            per_task_metadata = {"task": self.config["task"], "doc_id": doc_id, "split": self.config["eval_split"]}
+            inst = self.construct_requests(doc_id=doc_id, metadata=per_task_metadata)
+            if not isinstance(inst, list):
+                inst = [inst]
+
+            instances.append(inst)
+
+        sliced_instances = instances[:limit]
+        flattened_instances = [instance for instance_group in sliced_instances for instance in instance_group]
+        self._instances = flattened_instances
+
+
+    def construct_requests(self, doc_id: int, **kwargs) -> Union[List[Instance], Instance]:
+        split = kwargs.get("metadata").get("split")
+
+        if self.output_type == "generate_until":
+            arguments = (copy.deepcopy(self.config.generation_kwargs), self.doc_to_visual, doc_id,
+                         self.config.task, split)
+
+        return Instance(request_type=self.output_type, arguments=arguments, idx=0, **kwargs)
+
+
 # ======================= Task Output =======================
 class TaskOutput:
     def __init__(
-            self,
-            task=None,
-            task_name=None,
+        self,
+        task=None,
+        task_name=None,
     ):
         self.task = task
         self.task_name = task_name
