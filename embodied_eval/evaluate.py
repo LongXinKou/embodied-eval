@@ -18,7 +18,7 @@ def SimpleEvaluate(
     ### Postprocess outputs ###
     for task_output in eval_tasks:
         task = task_output.task
-        task.apply_filters()
+        # task.apply_filters() # TODO
 
         # Pre-process task.instances to group by doc_id
         instances_by_doc_id = collections.defaultdict(list)
@@ -28,18 +28,17 @@ def SimpleEvaluate(
             instances.sort(key=lambda x: x.idx)
 
         # iterate over different filters used
-        for filter_key in task.instances[0].filtered_resps.keys():
-            doc_iterator = task.doc_iterator(rank=RANK, limit=limit, world_size=WORLD_SIZE)
-            pbar = tqdm(total=len(task.eval_docs), desc=f"Postprocessing", disable=(RANK != 0))
+        doc_iterator = task.doc_iterator(rank=RANK, limit=limit, world_size=WORLD_SIZE)
+        pbar = tqdm(total=len(task.eval_docs), desc=f"Postprocessing", disable=(RANK != 0))
 
-            for doc_id, doc in doc_iterator:
-                requests = instances_by_doc_id[doc_id]
-                metrics = task.process_results(doc, [req.filtered_resps[filter_key] for req in requests])
+        for doc_id, doc in doc_iterator:
+            requests = instances_by_doc_id[doc_id]
+            metrics = task.process_results(doc, [req.resps for req in requests])
 
-                for metric, value in metrics.items():
-                    task_output.sample_metrics[(metric, filter_key)].append(value)
-                pbar.update(1)
-            pbar.close()
+            for metric, value in metrics.items():
+                task_output.sample_metrics[metric].append(value)
+            pbar.update(1)
+        pbar.close()
 
     if hasattr(model, "_model"):
         del model._model

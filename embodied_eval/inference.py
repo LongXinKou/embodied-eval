@@ -47,7 +47,6 @@ def Inference(
     task_dict,
     limit: Optional[Union[int, float]] = None,
 ):
-    results = collections.defaultdict(dict)
     requests = collections.defaultdict(list)
     padding_requests = collections.defaultdict(int)
 
@@ -88,7 +87,7 @@ def Inference(
         if (model.world_size > 1) and (padding_requests[reqtype] > 0):
             for _ in range(padding_requests[reqtype]):
                 cloned_reqs.extend([req] * req.repeats)
-
+        cloned_reqs = cloned_reqs[:2]
         # Run requests
         resps = getattr(model, reqtype)(cloned_reqs)
 

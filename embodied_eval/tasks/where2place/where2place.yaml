@@ -2,9 +2,10 @@ task: where2place
 dataset_path: /data/klx/hf_dataset/where2place/point_questions.jsonl
 dataset_kwargs:
   image_dir: /data/klx/hf_dataset/where2place/images/
+  target_image_dir: /data/klx/hf_dataset/where2place/masks/
 load_from_disk: True
-doc_to_visual: !function process.doc_to_visual
-doc_to_text: !function process.doc_to_text
+doc_to_visual: !function process.where2place_doc_to_visual
+doc_to_text: !function process.where2place_doc_to_text
 doc_to_target: "id"
 output_type: generate_until
 generation_kwargs:
@@ -13,3 +14,5 @@ generation_kwargs:
   top_p: 1.0
   num_beams: 1
   do_sample: false
+# metrics
+process_results: !function process.where2place_process_results

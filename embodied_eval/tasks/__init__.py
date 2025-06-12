@@ -248,7 +248,7 @@ class Task(abc.ABC):
             else:
                 results = [res.strip() for res in results]
 
-        kwargs = {}
+        kwargs = self.config.dataset_kwargs
         if callable(self.config.process_results):
             return self.config.process_results(doc, results, **kwargs)
 

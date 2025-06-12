@@ -8,6 +8,7 @@ from accelerate.utils import InitProcessGroupKwargs
 from loguru import logger as eval_logger
 
 from embodied_eval.inference import SimpleInference
+from embodied_eval.evaluate import SimpleEvaluate
 from embodied_eval.tasks import TaskManager
 from embodied_eval.models import get_model
 from embodied_eval.utils import (
@@ -116,10 +117,10 @@ def cli_evaluate_single(args):
     )
 
     # Evaluate
-    # results = SimpleEvaluate(
-    #     model=model,
-    #     eval_tasks=eval_tasks,
-    # )
+    results = SimpleEvaluate(
+        model=model,
+        eval_tasks=eval_tasks,
+    )
 
 
 if __name__ == "__main__":
