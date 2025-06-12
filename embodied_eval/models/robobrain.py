@@ -117,6 +117,14 @@ class RoboBrain(BaseAPIModel):
     @property
     def device(self):
         return self._device
+    
+    def flatten(self, input):
+        """Helper method to flatten a list of lists into a single list."""
+        new_list = []
+        for i in input:
+            for j in i:
+                new_list.append(j)
+        return new_list
 
     def generate_until(self, requests) -> List[str]:
         """Generate text until a stopping sequence."""
@@ -137,8 +145,14 @@ class RoboBrain(BaseAPIModel):
         progress_bar = tqdm(total=num_iters, disable=(self.rank != 0), desc="RoboBrain Responding")
 
         for batch in batches:
+            contexts, all_gen_kwargs, doc_to_visual, doc_id, task, split = zip(*batch)
+            task = task[0]
+            split = split[0]
 
-            # TODO request + batch
+            visual_list = [doc_to_visual[0](self.task_dict[task][split][ids]) if split is not None 
+                           else doc_to_visual[0](self.task_dict[task][ids]) for ids in doc_id]
+            visual_list = self.flatten(visual_list)
+            
             gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
 
             # Get generation parameters

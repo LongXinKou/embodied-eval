@@ -1,0 +1,15 @@
+task: where2place
+dataset_path: /data/klx/hf_dataset/where2place/point_questions.jsonl
+dataset_kwargs:
+  image_dir: /data/klx/hf_dataset/where2place/images/
+load_from_disk: True
+doc_to_visual: !function process.doc_to_visual
+doc_to_text: !function process.doc_to_text
+doc_to_target: "id"
+output_type: generate_until
+generation_kwargs:
+  max_new_tokens: 1024
+  temperature: 0
+  top_p: 1.0
+  num_beams: 1
+  do_sample: false

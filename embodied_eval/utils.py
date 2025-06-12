@@ -31,7 +31,7 @@ def load_json(json_path):
         data = []
         with open(json_path, "r") as f:
             for line in f:
-                data.append(json.loads(line).strip())
+                data.append(json.loads(line.strip()))
         return data
     else:
         return None

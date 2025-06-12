@@ -29,6 +29,7 @@ class TaskConfig(dict):
     dataset_name: str = None
     load_from_disk: bool = False
     eval_split: str = None
+    dataset_kwargs: dict = None
     # Formatting
     doc_to_visual: Union[Callable, str] = None
     doc_to_text: Union[Callable, str] = None
@@ -76,6 +77,7 @@ class Task(abc.ABC):
         self.dataset_path = getattr(self.config, 'dataset_path', None)
         self.dataset_name = getattr(self.config, 'dataset_name', None)
         self.load_from_disk = getattr(self.config, 'load_from_disk', False)
+        self.dataset_kwargs = getattr(self.config, 'dataset_kwargs', None)
         self.output_type = getattr(self.config, 'output_type')
 
         self.prepare_dataset()
@@ -101,7 +103,7 @@ class Task(abc.ABC):
         if self.config.eval_split is not None:
             return self.dataset[self.config.eval_split]
         else:
-            assert False, f"Task dataset (path={self.dataset_path}, name={self.dataset_name}) must have eval docs!"
+            return self.dataset
 
     def override_metric(self, metric_name: str) -> None:
         """
@@ -122,7 +124,21 @@ class Task(abc.ABC):
         if self.config.eval_split is not None:
             return self.dataset[self.config.eval_split]
         else:
-            assert False, f"Task dataset (path={self.dataset_path}, name={self.dataset_name}) must have eval docs!"
+            return self.dataset
+    
+    def doc_to_visual(self, doc: dict):
+        if callable(self.config.doc_to_visual):
+            if self.dataset_kwargs is not None:
+                return (self.config.doc_to_visual(doc, self.config.dataset_kwargs))
+            else:
+                pass
+    
+    def doc_to_text(self, doc: dict):
+        if callable(self.config.doc_to_text):
+            if self.dataset_kwargs is not None:
+                return (self.config.doc_to_text(doc, self.config.dataset_kwargs))
+            else:
+                pass
 
     def doc_iterator(self, *, rank: int = 0, limit: Union[int, None] = None, world_size: int = 1):
         limit = int(limit) if limit else None
@@ -142,8 +158,9 @@ class Task(abc.ABC):
                 download_mode=DownloadMode.REUSE_DATASET_IF_EXISTS,
             )
         else:
-            if self.dataset_path.endswith(".json"):
+            if self.dataset_path.endswith(".json") or self.dataset_path.endswith(".jsonl"):
                 self.dataset = load_json(self.dataset_path)
+                self.dataset = Dataset.from_list(self.dataset)
             elif self.dataset_path.endswith(".yaml"):
                 self.dataset = []
                 with open (self.dataset_path, "r") as f:
@@ -193,8 +210,9 @@ class Task(abc.ABC):
             doc_id_docs,
             total=len(self.eval_docs),
         ):
+            ctx = self.doc_to_text(doc)
             per_task_metadata = {"task": self.config["task"], "doc_id": doc_id, "repeats": self.config.repeats, "split": self.config["eval_split"]}
-            inst = self.construct_requests(doc_id=doc_id, metadata=per_task_metadata)
+            inst = self.construct_requests(ctx=ctx, doc_id=doc_id, metadata=per_task_metadata)
             if not isinstance(inst, list):
                 inst = [inst]
 
@@ -205,11 +223,11 @@ class Task(abc.ABC):
         self._instances = flattened_instances
 
 
-    def construct_requests(self, doc_id: int, **kwargs) -> Union[List[Instance], Instance]:
+    def construct_requests(self, ctx, doc_id, **kwargs) -> Union[List[Instance], Instance]:
         split = kwargs.get("metadata").get("split")
         # TODO MC
         if self.output_type == "generate_until":
-            arguments = (copy.deepcopy(self.config.generation_kwargs), self.doc_to_visual, doc_id,
+            arguments = (ctx, copy.deepcopy(self.config.generation_kwargs), self.doc_to_visual, doc_id,
                          self.config.task, split)
 
         return Instance(request_type=self.output_type, arguments=arguments, idx=0, **kwargs)
@@ -282,17 +300,21 @@ class TaskManager:
         return tasks
 
     def _get_tasks(self, task_dir: str):
+        ignore_dirs = [
+            "__pycache__",
+        ]
         tasks = collections.defaultdict()
         for root, dirs, file_list in os.walk(task_dir):
+            dirs[:] = [d for d in dirs if d not in ignore_dirs]
             for f in file_list:
                 if f.endswith(".yaml"):
                     yaml_path = os.path.join(root, f)
                     config = load_yaml_config(yaml_path)
 
-                tasks[config["task"]] = {
-                    "type": "task",
-                    "yaml_path": yaml_path,
-                }
+                    tasks[config["task"]] = {
+                        "type": "task",
+                        "yaml_path": yaml_path,
+                    }
         return tasks
 
     def _get_config(self, name):
@@ -306,7 +328,7 @@ class TaskManager:
             name: Optional[str] = None,
     ):
         def _load_task(config, task):
-            task_object = Task(config=config, model_name=self.model_name)
+            task_object = Task(config=config, model_name=name)
             return {task: task_object}
 
         if isinstance(name, str):

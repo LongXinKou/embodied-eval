@@ -23,13 +23,15 @@ def SimpleInference(
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    eval_logger.info(f"Setting random seed to {seed} | \
-        Setting numpy seed to {seed} | \
+    eval_logger.info(f"Setting random seed to {seed}  \
+        Setting numpy seed to {seed}  \
         Setting torch manual seed to {seed}s"
     )
 
     assert tasks != [], "No tasks specified, or no tasks found. Please verify the task names."
     task_dict = get_task_dict(tasks, task_manager)
+    for task_name, task_obj in task_dict.items():
+        model.task_dict[task_name] = task_obj.dataset
 
     eval_tasks = Inference(
         model=model,
@@ -43,7 +45,7 @@ def SimpleInference(
 def Inference(
     model,
     task_dict,
-    limit: Optional[int, float] = None,
+    limit: Optional[Union[int, float]] = None,
 ):
     results = collections.defaultdict(dict)
     requests = collections.defaultdict(list)
