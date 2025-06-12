@@ -2,6 +2,7 @@ import abc
 import os
 import copy
 import collections
+import inspect
 
 import random
 import math
@@ -33,6 +34,7 @@ class TaskConfig(dict):
     doc_to_text: Union[Callable, str] = None
     doc_to_target: Union[Callable, str] = None
     doc_to_choice: Union[Callable, str, dict, list] = None
+    process_results: Union[Callable, str] = None
     # Inference
     output_type: str = "generate_until"
     generation_kwargs: dict = None
@@ -101,11 +103,36 @@ class Task(abc.ABC):
         else:
             assert False, f"Task dataset (path={self.dataset_path}, name={self.dataset_name}) must have eval docs!"
 
+    def override_metric(self, metric_name: str) -> None:
+        """
+       Override the default metrics used for evaluation with custom metrics.
+
+       Parameters:
+       - metric_name (str): The name of the custom metric to override. Should be registered in common.metrics.
+       """
+        self._metric_fn_list, self._aggregation_list, self._metric_fn_kwargs, self._higher_is_better, = {}, {}, {}, {}
+
+        self._metric_fn_list[metric_name] = get_metric(metric_name)
+        self._aggregation_list[metric_name] = get_metric_aggregation(metric_name)
+        self._higher_is_better[metric_name] = is_higher_better(metric_name)
+        self._metric_fn_kwargs[metric_name] = {}
+
+
     def task_docs(self) -> Dataset:
         if self.config.eval_split is not None:
             return self.dataset[self.config.eval_split]
         else:
             assert False, f"Task dataset (path={self.dataset_path}, name={self.dataset_name}) must have eval docs!"
+
+    def doc_iterator(self, *, rank: int = 0, limit: Union[int, None] = None, world_size: int = 1):
+        limit = int(limit) if limit else None
+        doc_iterator = create_iterator(
+            enumerate(self.eval_docs),
+            rank=int(rank),
+            limit=limit,
+            world_size=int(world_size),
+        )
+        return doc_iterator
 
     def prepare_dataset(self):
         if not self.load_from_disk:
@@ -196,6 +223,16 @@ class Task(abc.ABC):
             eval_logger.warning("No filter defined, passing through instances")
             return self._instances
 
+    def process_results(self, doc, results,):
+        if self.output_type == "generate_until":
+            if isinstance(results, list) and isinstance(results[0], list):
+                results = [res.strip() for res in results[0]]
+            else:
+                results = [res.strip() for res in results]
+
+        kwargs = {}
+        if callable(self.config.process_results):
+            return self.config.process_results(doc, results, **kwargs)
 
 # ======================= Task Output =======================
 class TaskOutput:
@@ -206,6 +243,7 @@ class TaskOutput:
     ):
         self.task = task
         self.task_name = task_name
+        self.sample_metrics = collections.defaultdict(list)
 
     @classmethod
     def from_taskdict(cls, task_name: str, task):
@@ -213,6 +251,7 @@ class TaskOutput:
             task=task,
             task_name=task_name
         )
+
 
 # ======================= Task Manager =======================
 

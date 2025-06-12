@@ -5,7 +5,6 @@ import numpy as np
 import torch
 
 from loguru import logger as eval_logger
-from tqdm import tqdm
 from typing import List, Optional, Union
 
 from embodied_eval.tasks import TaskManager, get_task_dict, get_task_list
