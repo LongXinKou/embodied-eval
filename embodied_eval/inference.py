@@ -32,13 +32,13 @@ def SimpleInference(
     assert tasks != [], "No tasks specified, or no tasks found. Please verify the task names."
     task_dict = get_task_dict(tasks, task_manager)
 
-    result = Inference(
+    eval_tasks = Inference(
         model=model,
         task_dict=task_dict,
         limit=limit,
     )
 
-    return result
+    return eval_tasks
 
 @positional_deprecated
 def Inference(

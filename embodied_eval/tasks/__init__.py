@@ -66,6 +66,7 @@ class Task(abc.ABC):
             config: Optional[dict] = None,
             model_name: Optional[str] = None,
     ) -> None:
+        self._instances = None
         self._config = TaskConfig(**config)
         if self.config is None:
             raise ValueError("Must pass a config to Task")
@@ -76,7 +77,8 @@ class Task(abc.ABC):
         self.output_type = getattr(self.config, 'output_type')
 
         self.prepare_dataset()
-        self._instances = None
+        self.task_docs = self.task_docs()
+        self.features = list(self.task_docs.features.keys())
 
         # TODO MC
 
@@ -94,6 +96,12 @@ class Task(abc.ABC):
 
     @property
     def eval_docs(self) -> Dataset:
+        if self.config.eval_split is not None:
+            return self.dataset[self.config.eval_split]
+        else:
+            assert False, f"Task dataset (path={self.dataset_path}, name={self.dataset_name}) must have eval docs!"
+
+    def task_docs(self) -> Dataset:
         if self.config.eval_split is not None:
             return self.dataset[self.config.eval_split]
         else:
@@ -178,6 +186,15 @@ class Task(abc.ABC):
                          self.config.task, split)
 
         return Instance(request_type=self.output_type, arguments=arguments, idx=0, **kwargs)
+
+    def apply_filters(self) -> Optional[List[Instance]]:
+        """Iterates over FilterEnsembles and applies them to instances"""
+        if hasattr(self, "_filters"):
+            for f in self._filters:
+                f.apply(self._instances, self.task_docs)
+        else:
+            eval_logger.warning("No filter defined, passing through instances")
+            return self._instances
 
 
 # ======================= Task Output =======================

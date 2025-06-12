@@ -38,6 +38,12 @@ def parse_args():
         default=None,
     )
     parser.add_argument(
+        "--limit",
+        type=float,
+        default=None,
+        help="Limit the number of examples per task. " "If <1, limit is a percentage of the total number of examples.",
+    )
+    parser.add_argument(
         '--batch_size',
         type=int,
         default=1
@@ -46,6 +52,11 @@ def parse_args():
         "--output_path",
         default=None,
         type=str,
+    )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=42
     )
     parser.add_argument(
         "--timezone",
@@ -98,10 +109,19 @@ def cli_evaluate_single(args):
         )
 
     # Inference
-    prediction = SimpleInference()
+    eval_tasks = SimpleInference(
+        model=model,
+        tasks=task_list,
+        task_manager=task_manager,
+        limit=args.limit,
+        seed=args.seed,
+    )
 
     # Evaluate
-    results = SimpleEvaluate()
+    results = SimpleEvaluate(
+        model=model,
+        eval_tasks=eval_tasks,
+    )
 
 
 if __name__ == "__main__":
