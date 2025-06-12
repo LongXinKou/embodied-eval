@@ -118,10 +118,10 @@ def cli_evaluate_single(args):
     )
 
     # Evaluate
-    results = SimpleEvaluate(
-        model=model,
-        eval_tasks=eval_tasks,
-    )
+    # results = SimpleEvaluate(
+    #     model=model,
+    #     eval_tasks=eval_tasks,
+    # )
 
 
 if __name__ == "__main__":

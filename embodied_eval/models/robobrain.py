@@ -6,10 +6,10 @@ from PIL import Image
 
 from accelerate import Accelerator, DistributedType
 from transformers import AutoProcessor, AutoModelForPreTraining
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 from loguru import logger as eval_logger
 
-from embodied_eval.api.registry import register_model
+from embodied_eval.common.registry import register_model
 from embodied_eval.models import BaseAPIModel
 from embodied_eval.utils import Collator
 
@@ -137,7 +137,7 @@ class RoboBrain(BaseAPIModel):
         progress_bar = tqdm(total=num_iters, disable=(self.rank != 0), desc="RoboBrain Responding")
 
         for batch in batches:
-            
+
             # TODO request + batch
             gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
 
