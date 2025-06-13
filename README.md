@@ -2,12 +2,13 @@
 
 ## Why `embodied-eval`
 
-
 ## 🚀 TODO
 - [ ] Open-EQA
 - - [ ] EM-EQA 
 - - [ ] A-EQA 
 - [ ] GOAT-Bench
+
+1. 数据和模型的绝对路径 --> 相对路径
 
 ## 🎁 Benchmark
 | Category               | Items     | Paper                                                                                                                                |
