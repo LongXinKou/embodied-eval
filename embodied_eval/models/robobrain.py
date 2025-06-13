@@ -28,7 +28,7 @@ class RoboBrain(BaseAPIModel):
             device_map: Optional[str] = "cuda",
             max_length: Optional[int] = 2048,
             batch_size: Optional[Union[int, str]] = 1,
-            temperature: float = 0.7,
+            temperature: float = 0,
             do_sample: bool = True,
             system_prompt: Optional[str] = None,
             **kwargs,
