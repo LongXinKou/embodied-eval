@@ -23,7 +23,7 @@ class OpenAICompatible(BaseAPIModel):
             self,
             model_name_or_path: str = "gpt-4o",
             timeout: int = 10,
-            max_retries: int = 5,
+            max_retries: int = 4,
             batch_size: Optional[Union[int, str]] = 1,
             max_new_tokens: int = 1024,
             temperature: float = 0,
