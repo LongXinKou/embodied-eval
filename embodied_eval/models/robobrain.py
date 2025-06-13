@@ -29,7 +29,7 @@ class RoboBrain(BaseAPIModel):
             max_length: Optional[int] = 2048,
             batch_size: Optional[Union[int, str]] = 1,
             temperature: float = 0,
-            do_sample: bool = True,
+            do_sample: bool = False,
             system_prompt: Optional[str] = None,
             **kwargs,
     ) -> None:
