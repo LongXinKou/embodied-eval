@@ -14,6 +14,7 @@ from loguru import logger as eval_logger
 from tqdm import tqdm
 
 import yaml
+import pandas as pd
 
 from embodied_eval.common.instance import Instance
 from embodied_eval.common.metric import aggregation_for_metric
@@ -187,6 +188,8 @@ class Task(abc.ABC):
 
                         self.dataset.extend(cur_dataset)
                 self.dataset = Dataset.from_list(self.dataset)
+            elif self.dataset_path.endswith(".parquet"):
+                self.dataset = Dataset.from_parquet(self.dataset_path)
             else:
                 self.dataset = load_from_disk(dataset_path=self.dataset_path)
 

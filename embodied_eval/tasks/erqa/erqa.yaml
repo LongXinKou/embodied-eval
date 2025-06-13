@@ -1,0 +1,25 @@
+task: erqa
+dataset_path: /8T/klx/klx/hf_dataset/ERQA/data/test-00000-of-00001.parquet
+dataset_kwargs:
+  question: question
+  answer: answer
+  question_type: question_type
+  visual_indices: visual_indices
+  images: images
+load_from_disk: true
+doc_to_visual: !function process.erqa_doc_to_visual
+doc_to_text: !function process.erqa_doc_to_text
+doc_to_target: "id"
+output_type: generate_until
+generation_kwargs:
+  max_new_tokens: 1024
+  temperature: 0
+  top_p: 1.0
+  num_beams: 1
+  do_sample: false
+# metrics
+process_results: !function process.erqa_process_results
+metric_kwargs:
+  metric: reference_acc
+  aggregation: mean
+  higher_is_better: true

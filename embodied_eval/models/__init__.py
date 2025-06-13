@@ -11,6 +11,7 @@ T = TypeVar("T", bound="BaseAPIModel")
 
 AVAILABLE_MODELS = {
     "robobrain": "RoboBrain",
+    "cosmos_reason1": "CosmosReason1",
 }
 
 class BaseAPIModel(abc.ABC):

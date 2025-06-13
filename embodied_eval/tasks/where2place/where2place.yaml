@@ -1,8 +1,8 @@
 task: where2place
-dataset_path: /data/klx/hf_dataset/where2place/point_questions.jsonl
+dataset_path: /8T/klx/klx/hf_dataset/where2place/point_questions.jsonl
 dataset_kwargs:
-  image_dir: /data/klx/hf_dataset/where2place/images/
-  target_image_dir: /data/klx/hf_dataset/where2place/masks/
+  image_dir: /8T/klx/klx/hf_dataset/where2place/images/
+  target_image_dir: /8T/klx/klx/hf_dataset/where2place/masks/
 load_from_disk: true
 doc_to_visual: !function process.where2place_doc_to_visual
 doc_to_text: !function process.where2place_doc_to_text
