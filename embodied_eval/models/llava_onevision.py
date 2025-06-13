@@ -216,6 +216,19 @@ class Llava_OneVision(BaseAPIModel):
             gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
             if "until" in gen_kwargs:
                 gen_kwargs.pop("until")
+            # Get generation parameters
+            if "max_new_tokens" not in gen_kwargs:
+                gen_kwargs["max_new_tokens"] = self.max_new_tokens
+            if "do_sample" not in gen_kwargs:
+                gen_kwargs["do_sample"] = self.do_sample
+            if "temperature" not in gen_kwargs:
+                gen_kwargs["temperature"] = self.temperature
+            if "top_p" not in gen_kwargs:
+                gen_kwargs["top_p"] = self.top_p
+            if "num_beams" not in gen_kwargs:
+                gen_kwargs["num_beams"] = self.num_beams
+            if "use_cache" not in gen_kwargs:
+                gen_kwargs["use_cache"] = self.use_cache
 
             batch_visuals = [batch_doc_to_visual[0](self.task_dict[task][split][ids]) if split is not None 
                            else batch_doc_to_visual[0](self.task_dict[task][ids]) for ids in batch_doc_id]
@@ -267,20 +280,6 @@ class Llava_OneVision(BaseAPIModel):
                 conv.append_message(conv.roles[1], None)
                 prompt_question = conv.get_prompt()
                 question_input.append(prompt_question)
-
-            # Get generation parameters
-            if "max_new_tokens" not in gen_kwargs:
-                gen_kwargs["max_new_tokens"] = self.max_new_tokens
-            if "do_sample" not in gen_kwargs:
-                gen_kwargs["do_sample"] = self.do_sample
-            if "temperature" not in gen_kwargs:
-                gen_kwargs["temperature"] = self.temperature
-            if "top_p" not in gen_kwargs:
-                gen_kwargs["top_p"] = self.top_p
-            if "num_beams" not in gen_kwargs:
-                gen_kwargs["num_beams"] = self.num_beams
-            if "use_cache" not in gen_kwargs:
-                gen_kwargs["use_cache"] = self.use_cache
 
             # Input (input_ids, attention_mask, image_tensor)
             input_ids_list = [tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt") for prompt in question_input]

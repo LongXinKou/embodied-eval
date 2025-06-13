@@ -10,9 +10,10 @@ from embodied_eval.utils import (
 T = TypeVar("T", bound="BaseAPIModel")
 
 AVAILABLE_MODELS = {
+    "internvl3": "InternVL3",
     "llava_onevision": "Llava_OneVision",
-    "robobrain": "RoboBrain",
     "openai_compatible": "OpenAICompatible",
+    "robobrain": "RoboBrain",
 }
 
 class BaseAPIModel(abc.ABC):
