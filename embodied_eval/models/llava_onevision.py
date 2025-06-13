@@ -47,12 +47,6 @@ class Llava_OneVision(BaseAPIModel):
     def __init__(
             self,
             model_name_or_path: str = "lmms-lab/llava-onevision-qwen2-7b-ov",
-            max_frames_num: Optional[int] = 32,
-            token_strategy: Optional[str] = "single",  # could be "single" or "multiple", "multiple" denotes adding multiple <image> tokens for each frame
-            truncation: Optional[bool] = True,
-            attn_implementation: Optional[str] = best_fit_attn_implementation,
-            conv_template: Optional[str] = "qwen_1_5",
-            truncate_context: Optional[bool] = False,  # whether to truncate the context in generation, set it False for LLaVA-1.6
             device: Optional[str] = "cuda",
             device_map: Optional[str] = "cuda",
             max_length: Optional[int] = 2048,
@@ -64,6 +58,11 @@ class Llava_OneVision(BaseAPIModel):
             num_beams: Optional[int] = 1,
             use_cache: Optional[bool] = True,
             system_prompt: Optional[str] = None,
+            model_name: Optional[str] = None,
+            max_frames_num: Optional[int] = 32,
+            token_strategy: Optional[str] = "single",  # could be "single" or "multiple", "multiple" denotes adding multiple <image> tokens for each frame
+            attn_implementation: Optional[str] = best_fit_attn_implementation,
+            conv_template: Optional[str] = "qwen_1_5",
             **kwargs,
     ) -> None:
         super().__init__()
@@ -80,14 +79,17 @@ class Llava_OneVision(BaseAPIModel):
         llava_model_args = {
             "multimodal": True,
             "attn_implementation": attn_implementation,
-            "torch_dtype": torch.float16,
+            "torch_dtype": "float16",
         }
-        model_name = get_model_name_from_path(model_name_or_path)
 
         # Load model
         eval_logger.info(f"Loading LLaVA-OneVision model from {model_name_or_path}")
         self._tokenizer, self._model, self._image_processor, self._max_length = load_pretrained_model(
-            model_name_or_path, None, model_name, device_map=self.device_map, **llava_model_args
+            model_path=model_name_or_path,
+            model_base=None,
+            model_name=model_name, 
+            device_map=self.device_map, 
+            **llava_model_args
         )
         self.model.eval()
 
@@ -95,10 +97,6 @@ class Llava_OneVision(BaseAPIModel):
         self._config = self._model.config
         self._max_length = max_length if getattr(self._config, "max_length", None) else self._config.max_length
         self.batch_size_per_gpu = int(batch_size)
-        self.conv_template = conv_template
-        self.truncation = truncation
-        self.truncate_context = truncate_context
-
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.do_sample = do_sample
@@ -106,7 +104,9 @@ class Llava_OneVision(BaseAPIModel):
         self.num_beams = num_beams
         self.use_cache = use_cache
         self.system_prompt = system_prompt
-
+        
+        self.model_name = model_name
+        self.conv_template = conv_template
         self.max_frames_num = max_frames_num
         self.token_strategy = token_strategy
 
@@ -162,6 +162,15 @@ class Llava_OneVision(BaseAPIModel):
     def world_size(self):
         return self._world_size
     
+    def tok_encode(self, string: str, left_truncate_len=None, add_special_tokens=None) -> List[int]:
+        """ """
+        add_special_tokens = False if add_special_tokens is None else add_special_tokens
+        encoding = self.tokenizer.encode(string, add_special_tokens=add_special_tokens)
+        # left-truncate the encoded context to be at most `left_truncate_len` tokens long
+        if left_truncate_len:
+            encoding = encoding[-left_truncate_len:]
+        return encoding
+    
     def pad_sequence(self, input_ids, batch_first, padding_value):
         if self.tokenizer.padding_side == "left":
             input_ids = [torch.flip(_input_ids, [0]) for _input_ids in input_ids]
@@ -187,7 +196,7 @@ class Llava_OneVision(BaseAPIModel):
 
         def _sort_by_context_length(x):
             # Sort by context length for better batching
-            toks = self.processor.tokenizer.encode(x[0])
+            toks = self.tok_encode(x[0])
             return -len(toks), x[0]
         
         # Initialize the Collator to group requests and sort them by context length
