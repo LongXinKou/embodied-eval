@@ -112,9 +112,11 @@ def SimpleEvaluate(
         results_dict["samples"] = dict(samples)
         results_dict["configs"] = dict(configs)
 
-        eval_logger.info(f"Aggregating results across on ranks 0")
+        eval_logger.info(f"Aggregating results across on ranks {RANK}")
     else:
         results_dict = None
+
+        eval_logger.info(f"Pass on ranks {RANK}")
     
     if hasattr(model, "accelerator"):
         model.accelerator.wait_for_everyone()
