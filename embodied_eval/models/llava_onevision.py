@@ -52,17 +52,17 @@ class Llava_OneVision(BaseAPIModel):
             truncation: Optional[bool] = True,
             attn_implementation: Optional[str] = best_fit_attn_implementation,
             conv_template: Optional[str] = "qwen_1_5",
-            use_cache: Optional[bool] = True,
             truncate_context: Optional[bool] = False,  # whether to truncate the context in generation, set it False for LLaVA-1.6
             device: Optional[str] = "cuda",
             device_map: Optional[str] = "cuda",
             max_length: Optional[int] = 2048,
-            max_new_tokens: Optional[int] = 1024,
             batch_size: Optional[Union[int, str]] = 1,
+            max_new_tokens: Optional[int] = 1024,
             temperature: float = 0,
             do_sample: bool = False,
             top_p: Optional[int] = None,
             num_beams: Optional[int] = 1,
+            use_cache: Optional[bool] = True,
             system_prompt: Optional[str] = None,
             **kwargs,
     ) -> None:
@@ -96,14 +96,15 @@ class Llava_OneVision(BaseAPIModel):
         self._max_length = max_length if getattr(self._config, "max_length", None) else self._config.max_length
         self.batch_size_per_gpu = int(batch_size)
         self.conv_template = conv_template
-        self.max_new_tokens = max_new_tokens
-        self.use_cache = use_cache
         self.truncation = truncation
         self.truncate_context = truncate_context
+
+        self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.do_sample = do_sample
         self.top_p = top_p
         self.num_beams = num_beams
+        self.use_cache = use_cache
         self.system_prompt = system_prompt
 
         self.max_frames_num = max_frames_num
