@@ -23,6 +23,7 @@ dash==3.0.4
 DataProperty==1.1.0
 datasets==2.16.1
 decorator==5.2.1
+decord==0.6.0
 defusedxml==0.7.1
 dill==0.3.7
 distro==1.9.0
