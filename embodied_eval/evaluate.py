@@ -9,6 +9,8 @@ from loguru import logger as eval_logger
 from typing import List, Optional, Union
 from tqdm import tqdm
 
+from embodied_eval.utils import create_iterator
+
 def SimpleEvaluate(
     model,
     eval_tasks,
@@ -26,7 +28,6 @@ def SimpleEvaluate(
     ### Postprocess outputs ###
     for task_output in eval_tasks:
         task = task_output.task
-        task_name = task_output.task_name
         # task.apply_filters() # TODO
 
         # Pre-process task.instances to group by doc_id
@@ -38,7 +39,10 @@ def SimpleEvaluate(
 
         # iterate over different filters used
         doc_iterator = task.doc_iterator(rank=RANK, limit=limit, world_size=WORLD_SIZE)
-        pbar = tqdm(total=len(task.eval_docs), desc=f"Postprocessing", disable=(RANK != 0))
+        doc_iterator_for_counting = create_iterator(range(len(task.eval_docs)), rank=RANK, limit=limit, world_size=WORLD_SIZE)
+        num_docs = sum(1 for _ in doc_iterator_for_counting)
+
+        pbar = tqdm(total=num_docs, desc=f"Postprocessing", disable=(RANK != 0))
 
         for doc_id, doc in doc_iterator:
             requests = instances_by_doc_id[doc_id]
@@ -79,6 +83,7 @@ def SimpleEvaluate(
             if RANK == 0:
                 task_output.logged_samples = list(itertools.chain.from_iterable(full_samples))
 
+            eval_logger.info(f"Gathering sample across all ranks for: {task_output.task_name}")
             
             for metrics in task_output.sample_metrics:
                 metric_list = [None] * WORLD_SIZE if RANK == 0 else None
@@ -89,6 +94,8 @@ def SimpleEvaluate(
                 )
                 if RANK == 0:
                     task_output.sample_metrics[metrics] = list(itertools.chain.from_iterable(metric_list))
+            
+            eval_logger.info(f"Gathering results across all ranks for: {task_output.task_name}")
 
         torch.distributed.barrier()  # Ensure all processes are synced before proceeding
 
@@ -104,6 +111,8 @@ def SimpleEvaluate(
         results_dict["results"] = dict(results)
         results_dict["samples"] = dict(samples)
         results_dict["configs"] = dict(configs)
+
+        eval_logger.info(f"Aggregating results across on ranks 0")
     else:
         results_dict = None
     
