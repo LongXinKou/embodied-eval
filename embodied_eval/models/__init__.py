@@ -11,6 +11,7 @@ T = TypeVar("T", bound="BaseAPIModel")
 
 AVAILABLE_MODELS = {
     "robobrain": "RoboBrain",
+    "openai_compatible": "OpenAICompatible",
 }
 
 class BaseAPIModel(abc.ABC):
