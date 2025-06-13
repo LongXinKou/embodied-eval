@@ -28,8 +28,12 @@ class RoboBrain(BaseAPIModel):
             device_map: Optional[str] = "cuda",
             max_length: Optional[int] = 2048,
             batch_size: Optional[Union[int, str]] = 1,
-            temperature: float = 0.7,
-            do_sample: bool = True,
+            max_new_tokens: Optional[int] = 1024,
+            temperature: float = 0,
+            do_sample: bool = False,
+            top_p: Optional[int] = None,
+            num_beams: Optional[int] = 1,
+            use_cache: Optional[bool] = True,
             system_prompt: Optional[str] = None,
             **kwargs,
     ) -> None:
@@ -72,8 +76,13 @@ class RoboBrain(BaseAPIModel):
         self._config = self._model.config
         self._max_length = max_length if getattr(self._config, "max_length", None) else self._config.max_length
         self.batch_size_per_gpu = int(batch_size)
+
+        self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.do_sample = do_sample
+        self.top_p = top_p
+        self.num_beams = num_beams
+        self.use_cache = use_cache
         self.system_prompt = system_prompt
 
         # Set up distributed evaluation
@@ -145,20 +154,10 @@ class RoboBrain(BaseAPIModel):
         progress_bar = tqdm(total=num_iters, disable=(self.rank != 0), desc="RoboBrain Responding")
 
         for batch in batches:
-            contexts, all_gen_kwargs, doc_to_visual, doc_id, task, split = zip(*batch)
-            task = task[0]
-            split = split[0]
-
-            visual_list = [doc_to_visual[0](self.task_dict[task][split][ids]) if split is not None 
-                           else doc_to_visual[0](self.task_dict[task][ids]) for ids in doc_id]
-            visual_list = self.flatten(visual_list)
-            
+            batch_contexts, all_gen_kwargs, batch_doc_to_visual, batch_doc_id, batch_task, batch_split = zip(*batch)
+            task = batch_task[0]
+            split = batch_split[0]
             gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
-
-            # Get generation parameters
-            do_sample = gen_kwargs.get("do_sample", self.do_sample)
-            temperature = gen_kwargs.get("temperature", self.temperature)
-            max_new_tokens = gen_kwargs.get("max_new_tokens", 256)
 
             # Define a stopping sequence if specified
             until = [self.processor.tokenizer.decode(self.eot_token_id)]
@@ -169,52 +168,59 @@ class RoboBrain(BaseAPIModel):
                 elif isinstance(until_from_kwargs, list):
                     until = until_from_kwargs
 
-            contexts = list(contexts)
+            batch_visuals = [batch_doc_to_visual[0](self.task_dict[task][split][ids]) if split is not None 
+                           else batch_doc_to_visual[0](self.task_dict[task][ids]) for ids in batch_doc_id]
+            
+            # Get generation parameters
+            if "max_new_tokens" not in gen_kwargs:
+                gen_kwargs["max_new_tokens"] = self.max_new_tokens
+            if "do_sample" not in gen_kwargs:
+                gen_kwargs["do_sample"] = self.do_sample
+            if "temperature" not in gen_kwargs:
+                gen_kwargs["temperature"] = self.temperature
+            if "top_p" not in gen_kwargs:
+                gen_kwargs["top_p"] = self.top_p
+            if "num_beams" not in gen_kwargs:
+                gen_kwargs["num_beams"] = self.num_beams
+            if "use_cache" not in gen_kwargs:
+                gen_kwargs["use_cache"] = self.use_cache
 
-            batched_messages = []
-            for i, context in enumerate(contexts):
+            # Input (input_ids, attention_mask)
+            input_ids_list, attention_mask_list = [], []
+            input_lengths = []
+            for visual, context in zip(batch_visuals, batch_contexts): 
                 if self.system_prompt:
                     message = [{"role": "system", "content": self.system_prompt}]
                 else:
                     message = []
-
+                
                 content_parts = []
+                # For context   
                 content_parts.append({"type": "text", "text": context})
-                if i < len(visual_list) and visual_list[i] is not None:
-                    visual = visual_list[i]
-                    if isinstance(visual, str) and (visual.startswith("http")):
-                        content_parts.append({"type": "image", "url": visual})
-                    elif isinstance(visual, (str, Image.Image, np.ndarray)):
-                        content_parts.append({"type": "image", "image": self._process_image(visual)})
 
+                # For image, multi-image 
+                if isinstance(visual, str) and (visual.startswith("http")):
+                    content_parts.append({"type": "image", "url": visual})
+                elif isinstance(visual, (str, Image.Image, np.ndarray)):
+                    content_parts.append({"type": "image", "image": self._process_image(visual)})
+                
                 message.append({"role": "user", "content": content_parts})
-                batched_messages.append(message)
 
-            # Process all messages in batch
-            inputs_list = []
-            input_lengths = []
-            for message in batched_messages:
                 inputs = self.processor.apply_chat_template(
                     message, add_generation_prompt=True, tokenize=True, return_dict=True, return_tensors="pt"
                 )
-                # Add attention mask if it's missing
-                inputs["attention_mask"] = inputs.get('attention_mask',
-                                                      inputs['input_ids'].ne(self.processor.tokenizer.pad_token_id))
-
-                inputs_list.append(inputs)
+                input_ids_list.append(inputs['input_ids'])
+                attention_mask_list.append(inputs.get('attention_mask',inputs['input_ids'].ne(self.processor.tokenizer.pad_token_id)))
                 input_lengths.append(inputs['input_ids'].shape[1])
 
-            batch_inputs = {}
-            for key in inputs_list[0].keys():
-                batch_inputs[key] = torch.cat([inp[key] for inp in inputs_list], dim=0)
-            batch_inputs = {k: v.to(self.device) for k, v in batch_inputs.items()}
+            input_ids = torch.cat(input_ids_list, dim=0).to(self.device)
+            attention_mask = torch.cat(attention_mask_list, dim=0).to(self.device)
 
             # Generate output
             output = self.model.generate(
-                **batch_inputs,
-                max_new_tokens=max_new_tokens,
-                do_sample=do_sample,
-                temperature=temperature
+                input_ids,
+                attention_mask=attention_mask,
+                **gen_kwargs
             )
 
             generated_ids_trimmed = [out_ids[in_ids:] for in_ids, out_ids in zip(input_lengths, output)]
@@ -231,7 +237,7 @@ class RoboBrain(BaseAPIModel):
                 answers[i] = ans
 
             # Cache result
-            for ans, context in zip(answers, contexts):
+            for ans, context in zip(answers, batch_contexts):
                 res.append(ans)
                 progress_bar.update(1)
 

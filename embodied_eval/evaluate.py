@@ -111,6 +111,7 @@ def SimpleEvaluate(
         results_dict["results"] = dict(results)
         results_dict["samples"] = dict(samples)
         results_dict["configs"] = dict(configs)
+        
 
         eval_logger.info(f"Aggregating results across on ranks {RANK}")
     else:
