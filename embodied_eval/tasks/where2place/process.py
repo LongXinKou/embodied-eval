@@ -45,9 +45,9 @@ def where2place_process_results(doc, results, dataset_kwargs=None):
             np.zeros(points.shape[0] - in_range.sum())
         ]).mean()
     
-    result_dict = {"acc": acc}
+    result_dict = {"target": mask_to_bbox(mask), "where2place_acc": acc}
 
-    return {f"where2place_{metric}": value for metric, value in result_dict.items()}
+    return {key: value for key, value in result_dict.items()}
 
 def text2points(text, width=640, height=480):
     pattern = r"\(([-+]?\d+\.?\d*(?:,\s*[-+]?\d+\.?\d*)*?)\)"
@@ -75,3 +75,15 @@ def text2points(text, width=640, height=480):
             y, x = np.where(mask)
             points.extend(list(np.stack([x, y], axis=1)))
     return np.array(points)
+
+def mask_to_bbox(mask, threshold=0.5):
+    binary_mask = mask > threshold
+    ys, xs = np.where(binary_mask)
+
+    if len(xs) == 0 or len(ys) == 0:
+        return None
+
+    x0, x1 = xs.min(), xs.max()
+    y0, y1 = ys.min(), ys.max()
+
+    return (x0, y0, x1, y1)

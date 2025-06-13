@@ -3,7 +3,7 @@ dataset_path: /data/klx/hf_dataset/where2place/point_questions.jsonl
 dataset_kwargs:
   image_dir: /data/klx/hf_dataset/where2place/images/
   target_image_dir: /data/klx/hf_dataset/where2place/masks/
-load_from_disk: True
+load_from_disk: true
 doc_to_visual: !function process.where2place_doc_to_visual
 doc_to_text: !function process.where2place_doc_to_text
 doc_to_target: "id"
@@ -16,3 +16,7 @@ generation_kwargs:
   do_sample: false
 # metrics
 process_results: !function process.where2place_process_results
+metric_kwargs:
+  metric: reference_acc
+  aggregation: mean
+  higher_is_better: true

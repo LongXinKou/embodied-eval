@@ -222,7 +222,7 @@ class RoboBrain(BaseAPIModel):
                 generated_ids_trimmed,
                 skip_special_tokens=True,
             )
-
+            
             # Apply stopping sequence if needed
             for i, ans in enumerate(answers):
                 for term in until:

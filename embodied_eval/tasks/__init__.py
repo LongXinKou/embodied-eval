@@ -2,7 +2,6 @@ import abc
 import os
 import copy
 import collections
-import inspect
 
 import random
 import math
@@ -17,6 +16,7 @@ from tqdm import tqdm
 import yaml
 
 from embodied_eval.common.instance import Instance
+from embodied_eval.common.metric import aggregation_for_metric
 from embodied_eval.utils import load_yaml_config, load_json, pattern_match, create_iterator
 
 # ======================= Task Config =======================
@@ -40,6 +40,8 @@ class TaskConfig(dict):
     output_type: str = "generate_until"
     generation_kwargs: dict = None
     repeats: int = 1
+    # Score
+    metric_kwargs: dict = None
 
     def __getitem__(self, item):
         return getattr(self, item)
@@ -105,20 +107,13 @@ class Task(abc.ABC):
         else:
             return self.dataset
 
-    def override_metric(self, metric_name: str) -> None:
+    def dump_config(self) -> dict:
+        """Returns a dictionary representing the task's config.
+
+        :returns: str
+            The fewshot context.
         """
-       Override the default metrics used for evaluation with custom metrics.
-
-       Parameters:
-       - metric_name (str): The name of the custom metric to override. Should be registered in common.metrics.
-       """
-        self._metric_fn_list, self._aggregation_list, self._metric_fn_kwargs, self._higher_is_better, = {}, {}, {}, {}
-
-        self._metric_fn_list[metric_name] = get_metric(metric_name)
-        self._aggregation_list[metric_name] = get_metric_aggregation(metric_name)
-        self._higher_is_better[metric_name] = is_higher_better(metric_name)
-        self._metric_fn_kwargs[metric_name] = {}
-
+        return self.config.to_dict()
 
     def task_docs(self) -> Dataset:
         if self.config.eval_split is not None:
@@ -160,6 +155,7 @@ class Task(abc.ABC):
         else:
             if self.dataset_path.endswith(".json") or self.dataset_path.endswith(".jsonl"):
                 self.dataset = load_json(self.dataset_path)
+                # self.dataset = self.dataset[:4] # TODO
                 self.dataset = Dataset.from_list(self.dataset)
             elif self.dataset_path.endswith(".yaml"):
                 self.dataset = []
@@ -206,9 +202,13 @@ class Task(abc.ABC):
         instances = []
 
         doc_id_docs = create_iterator(enumerate(self.eval_docs), rank=rank, limit=limit, world_size=world_size)
+        doc_iterator_for_counting = create_iterator(range(len(self.eval_docs)), rank=rank, limit=limit, world_size=world_size)
+
+        num_docs = sum(1 for _ in doc_iterator_for_counting)
+
         for doc_id, doc in tqdm(
             doc_id_docs,
-            total=len(self.eval_docs),
+            total=num_docs,
         ):
             ctx = self.doc_to_text(doc)
             per_task_metadata = {"task": self.config["task"], "doc_id": doc_id, "repeats": self.config.repeats, "split": self.config["eval_split"]}
@@ -250,7 +250,7 @@ class Task(abc.ABC):
 
         kwargs = self.config.dataset_kwargs
         if callable(self.config.process_results):
-            return self.config.process_results(doc, results, **kwargs)
+            return self.config.process_results(doc, results, kwargs)
 
 # ======================= Task Output =======================
 class TaskOutput:
@@ -258,18 +258,36 @@ class TaskOutput:
         self,
         task=None,
         task_name=None,
+        task_config=None,
     ):
         self.task = task
         self.task_name = task_name
+        self.task_config = task_config
         self.sample_metrics = collections.defaultdict(list)
+        self.agg_metrics = collections.defaultdict(list)
+        self.logged_samples = []
 
     @classmethod
     def from_taskdict(cls, task_name: str, task):
+        task_config = dict(task.dump_config())
         return cls(
             task=task,
-            task_name=task_name
+            task_name=task_name,
+            task_config=task_config
         )
+    
+    def calculate_aggregate_metric(self, bootstrap_iters=100000) -> None:
+        results = {}
 
+        for metric, value in self.sample_metrics.items():
+            # agg_fn(value) --> score + std TODO
+            aggregation = self.task.config.metric_kwargs.get("aggregation", "mean")
+            self.agg_metrics[metric], self.agg_metrics[f"{metric}_stderr"] = aggregation_for_metric(value, aggregation)
+            
+            results[metric] = self.agg_metrics[metric]
+            results[f"{metric}_stderr"] = self.agg_metrics[f"{metric}_stderr"]
+
+        return results
 
 # ======================= Task Manager =======================
 

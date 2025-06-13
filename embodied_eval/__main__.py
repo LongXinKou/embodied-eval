@@ -8,7 +8,7 @@ from accelerate.utils import InitProcessGroupKwargs
 from loguru import logger as eval_logger
 
 from embodied_eval.inference import SimpleInference
-from embodied_eval.evaluate import SimpleEvaluate
+from embodied_eval.evaluate import SimpleEvaluate, SaveResult
 from embodied_eval.tasks import TaskManager
 from embodied_eval.models import get_model
 from embodied_eval.utils import (
@@ -64,10 +64,8 @@ def parse_args():
     )
     return parser.parse_args()
 
-def cli_evaluate(args):
 
-    results_list = []
-    
+def cli_evaluate(args):
     # reset logger
     eval_logger.remove()
     eval_logger.add(sys.stdout, colorize=True, level=args.verbosity)
@@ -79,14 +77,24 @@ def cli_evaluate(args):
     accelerator = Accelerator(kwargs_handlers=[kwargs_handler])
 
     try:
-        results, samples = cli_evaluate_single(args)
-        results_list.append(results)
-        accelerator.wait_for_everyone()
+        datetime_str = get_datetime_str(timezone=args.timezone)
+
+        results_dict = cli_evaluate_single(args)
+
+        if results_dict:
+            # Visualize
+            print_results(results_dict, args)
+
+            # Save
+            SaveResult(
+                results_dict=results_dict,
+                output_path=args.output_path,
+                datetime_str=datetime_str
+            )
 
     except Exception as e:
         eval_logger.error(
             f"Error during evaluation: {e}. Please set `--verbosity=DEBUG` to get more information.")
-        results_list.append(None)
 
 def cli_evaluate_single(args):
     task_manager = TaskManager()
@@ -117,10 +125,57 @@ def cli_evaluate_single(args):
     )
 
     # Evaluate
-    results = SimpleEvaluate(
+    results_dict = SimpleEvaluate(
         model=model,
         eval_tasks=eval_tasks,
     )
+
+    return results_dict
+
+def print_results(results_dict, args):
+    results = results_dict["results"]
+    configs = results_dict["configs"]
+    for task_name, _ in results.items():
+        result, config = results[task_name], configs[task_name]
+        info = f"task:{config['task']}, data:{config['dataset_path']}/{config['dataset_kwargs']},\
+            generate:{config['generation_kwargs']}"
+        print(info)
+        make_table(result, args)
+    
+def make_table(result, args):
+    from pytablewriter import MarkdownTableWriter, LatexTableWriter
+    all_metrics = sorted({
+        k for k in result
+        if not k.endswith("_stderr")
+    })
+
+    headers = ["Model"] + all_metrics
+    rows = []
+
+    model = args.model
+    row = [model]
+    for metric in all_metrics:
+        val = result.get(metric)
+        err = result.get(f"{metric}_stderr")
+        if err is not None:
+            row.append(f"{val:.4f} ± {err:.4f}")
+        else:
+            row.append(f"{val:.4f}")
+    rows.append(row)
+    
+    unique_rows = {}
+    for row in rows:
+        unique_rows[row[0]] = row  # Overwrites if model name repeats
+    rows = list(unique_rows.values())
+
+    # Print Markdown
+    md_writer = MarkdownTableWriter()
+    md_writer.table_name = "Results Table"
+    md_writer.headers = headers
+    md_writer.value_matrix = rows
+
+    print("Markdown Table:\n")
+    md_writer.write_table()
 
 
 if __name__ == "__main__":
