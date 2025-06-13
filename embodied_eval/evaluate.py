@@ -1,8 +1,11 @@
 import collections
 import itertools
+import json
+import numpy as np
+import os
 import torch
 
-
+from loguru import logger as eval_logger
 from typing import List, Optional, Union
 from tqdm import tqdm
 
@@ -14,6 +17,7 @@ def SimpleEvaluate(
 ):
     results_dict = collections.defaultdict(dict)
     results = collections.defaultdict(dict)
+    configs = collections.defaultdict(dict)
     samples = collections.defaultdict(list)
 
     RANK = model.rank
@@ -94,12 +98,71 @@ def SimpleEvaluate(
         for task_output in eval_tasks:
             result = task_output.calculate_aggregate_metric(bootstrap_iters=bootstrap_iters)
             results[task_output.task_name] = result
+            configs[task_output.task_name] = task_output.task_config
             samples[task_output.task_name] = task_output.logged_samples
         
         results_dict["results"] = dict(results)
         results_dict["samples"] = dict(samples)
+        results_dict["configs"] = dict(configs)
+    else:
+        results_dict = None
     
     if hasattr(model, "accelerator"):
         model.accelerator.wait_for_everyone()
     
     return results_dict
+
+def SaveResult(
+    results_dict,
+    output_path,
+    datetime_str
+):
+    def handle_non_serializable(o):
+        if isinstance(o, np.int64) or isinstance(o, np.int32):
+            return int(o)
+        elif isinstance(o, set):
+            return list(o)
+        else:
+            return str(o)
+    
+    tasks_samples = results_dict.pop('samples')
+    tasks_results = results_dict.pop('results')
+    tasks_configs = results_dict.pop('configs')
+
+    for task_name, _ in tasks_results.items():
+        samples = tasks_samples[task_name]
+        results = tasks_results[task_name]
+        configs = tasks_configs[task_name]
+
+        if output_path:
+            os.makedirs(os.path.join(output_path, datetime_str), exist_ok=True)
+            eval_logger.info(f"Saving per-sample results for: {task_name}")
+
+            file_results_samples = os.path.join(output_path, datetime_str, f"samples_{task_name}.json")
+            for sample in samples:
+                sample_dump = (
+                    json.dumps(
+                        sample,
+                        default=handle_non_serializable,
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+                with open(file_results_samples, "a", encoding="utf-8") as f:
+                    f.write(sample_dump)
+            
+            file_results_aggregated = os.path.join(output_path, datetime_str, f"results_{task_name}.json")
+            result_dumped = json.dumps(results, indent=4, default=handle_non_serializable)
+            with open(file_results_aggregated, "a", encoding="utf-8") as f:
+                f.write(result_dumped)
+            
+            file_configs_aggregated = os.path.join(output_path, datetime_str, f"configs_{task_name}.json")
+            result_dumped = json.dumps(configs, indent=4, default=handle_non_serializable)
+            with open(file_configs_aggregated, "a", encoding="utf-8") as f:
+                f.write(result_dumped)
+
+        else:
+            eval_logger.info("Output path not provided, skipping saving results")
+
+
+    
