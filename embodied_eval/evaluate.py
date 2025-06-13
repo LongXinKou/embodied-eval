@@ -12,12 +12,17 @@ def SimpleEvaluate(
     limit: Optional[Union[int, float]] = None,
     bootstrap_iters: Optional[int] = 100000,
 ):
+    results_dict = collections.defaultdict(dict)
+    results = collections.defaultdict(dict)
+    samples = collections.defaultdict(list)
+
     RANK = model.rank
     WORLD_SIZE = model.world_size
 
     ### Postprocess outputs ###
     for task_output in eval_tasks:
         task = task_output.task
+        task_name = task_output.task_name
         # task.apply_filters() # TODO
 
         # Pre-process task.instances to group by doc_id
@@ -34,6 +39,15 @@ def SimpleEvaluate(
         for doc_id, doc in doc_iterator:
             requests = instances_by_doc_id[doc_id]
             metrics = task.process_results(doc, [req.resps for req in requests])
+            
+            target = metrics.pop('target', None)
+            example = {
+                "doc_id": doc_id,
+                "doc": requests[0].args[0],
+                "target": target,
+                "resps": [req.resps for req in requests],
+            }
+            task_output.logged_samples.append(example)
 
             for metric, value in metrics.items():
                 task_output.sample_metrics[metric].append(value)
@@ -48,6 +62,20 @@ def SimpleEvaluate(
         # if multigpu, then gather data across all ranks to rank 0
         # first gather logged samples across all ranks
         for task_output in eval_tasks:
+            full_samples = [None] * WORLD_SIZE if RANK == 0 else None
+            per_rank_samples = []
+            for sample in task_output.logged_samples:
+                per_rank_samples.append(sample)
+            torch.distributed.gather_object(
+                    obj=per_rank_samples,
+                    object_gather_list=full_samples,
+                    dst=0,
+                )
+            
+            if RANK == 0:
+                task_output.logged_samples = list(itertools.chain.from_iterable(full_samples))
+
+            
             for metrics in task_output.sample_metrics:
                 metric_list = [None] * WORLD_SIZE if RANK == 0 else None
                 torch.distributed.gather_object(
@@ -64,4 +92,14 @@ def SimpleEvaluate(
         ### Aggregate results over all datapoints ###
         # aggregate results ; run bootstrap CIs
         for task_output in eval_tasks:
-            task_output.calculate_aggregate_metric(bootstrap_iters=bootstrap_iters)
+            result = task_output.calculate_aggregate_metric(bootstrap_iters=bootstrap_iters)
+            results[task_output.task_name] = result
+            samples[task_output.task_name] = task_output.logged_samples
+        
+        results_dict["results"] = dict(results)
+        results_dict["samples"] = dict(samples)
+    
+    if hasattr(model, "accelerator"):
+        model.accelerator.wait_for_everyone()
+    
+    return results_dict
