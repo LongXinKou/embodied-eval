@@ -139,42 +139,47 @@ def print_results(results_dict, args):
         result, config = results[task_name], configs[task_name]
         info = f"task:{config['task']}, data:{config['dataset_path']}/{config['dataset_kwargs']},\
             generate:{config['generation_kwargs']}"
-        print(info)
+        eval_logger.info(info)
         make_table(result, args)
     
 def make_table(result, args):
-    from pytablewriter import MarkdownTableWriter, LatexTableWriter
-    all_metrics = sorted({
-        k for k in result
-        if not k.endswith("_stderr")
-    })
-
-    headers = ["Model"] + all_metrics
-    rows = []
+    from pytablewriter import MarkdownTableWriter
+    import re
 
     model = args.model
-    row = [model]
+
+    type_to_metrics = {}
+    for key, val in result.items():
+        if key == "overall" or key.endswith("_stderr"):
+            continue
+        match = re.match(r"(.+?)_([a-zA-Z0-9:.]+)$", key)
+        if match:
+            qtype, metric = match.groups()
+            if qtype not in type_to_metrics:
+                type_to_metrics[qtype] = {}
+            type_to_metrics[qtype][metric] = val
+
+    all_metrics = sorted({m for v in type_to_metrics.values() for m in v})
+
+    headers = ["Metric"] + list(type_to_metrics.keys())
+    value_matrix = []
+
     for metric in all_metrics:
-        val = result.get(metric)
-        err = result.get(f"{metric}_stderr")
-        if err is not None:
-            row.append(f"{val:.4f} ± {err:.4f}")
-        else:
-            row.append(f"{val:.4f}")
-    rows.append(row)
-    
-    unique_rows = {}
-    for row in rows:
-        unique_rows[row[0]] = row  # Overwrites if model name repeats
-    rows = list(unique_rows.values())
+        row = [metric]
+        for qtype in type_to_metrics:
+            val = type_to_metrics[qtype].get(metric, "")
+            row.append(f"{val:.4f}" if val != "" else "")
+        value_matrix.append(row)
 
-    # Print Markdown
+    # Step 4: 输出 markdown 表格
+    from pytablewriter import MarkdownTableWriter
     md_writer = MarkdownTableWriter()
-    md_writer.table_name = "Results Table"
+    md_writer.table_name = f"Results for {model}"
     md_writer.headers = headers
-    md_writer.value_matrix = rows
+    md_writer.value_matrix = value_matrix
 
-    print("Markdown Table:\n")
+    eval_logger.info("Markdown Table:\n")
+    eval_logger.info(f"Overall: {result['overall']}")
     md_writer.write_table()
 
 

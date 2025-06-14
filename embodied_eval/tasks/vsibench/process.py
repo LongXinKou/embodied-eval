@@ -3,6 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 
+from functools import partial
 from loguru import logger as eval_logger
 
 MCA_QUESTION_TYPES = [
@@ -55,24 +56,40 @@ def vsibench_doc_to_text(doc, dataset_kwargs=None):
         return "\n".join([pre_prompt, question, options, post_prompt])
     else:
         raise ValueError(f"Unknown question type: {doc['question_type']}")
-    
-def vsibench_process_results(doc, results):
+
+
+def vsibench_process_results(doc, results, dataset_kwargs=None):
     doc["prediction"] = results[0]
+
+    result_dict = {"target": doc["ground_truth"]}
     if doc["question_type"] in MCA_QUESTION_TYPES:
         for key, value in METRICS_FOR_MCA.items():
             doc[key] = eval(value)(fuzzy_matching(doc["prediction"]), doc["ground_truth"])
+            result_dict[key] = doc[key]
+            result_dict["question_type"] = doc["question_type"]
+
     elif doc["question_type"] in NA_QUESTION_TYPES:
         for key, value in METRICS_FOR_NA.items():
             try:
                 doc[key] = eval(value)(to_float(fuzzy_matching(doc["prediction"])), to_float(doc["ground_truth"]))
             except TypeError:
                 doc[key] = WORST_CASE_FOR_METRICS[key]
-    else:
-        raise ValueError(f"Unknown question type: {doc['question_type']}")
+            result_dict[key] = doc[key]
+            result_dict["question_type"] = doc["question_type"]
+    return result_dict
 
-    return {"vsibench_score": doc}
 
 def vsibench_aggregate_results(results):
+    """
+    Input
+        - results: Optional(list(dict))
+        [{question_type:, accuracy:,}, {...}]
+
+    Output
+        - {question-type_metric:, ..., overall: }
+    """
+    for r in results:
+        assert "question_type" in r, r
     results = pd.DataFrame(results)
 
     output = {}
@@ -85,13 +102,7 @@ def vsibench_aggregate_results(results):
                 output[f"{question_type}_{metric}"] = per_question_type[metric].mean()
         elif question_type in NA_QUESTION_TYPES:
             for metric in METRICS_FOR_NA.keys():
-                if metric == "success_rate":
-                    output[f"{question_type}_{metric}"] = per_question_type[metric].mean()
-                else:
-                    output[f"{question_type}_{metric}"] = per_question_type[metric].mean()
-
-        else:
-            raise ValueError(f"Unknown question type: {question_type}")
+                output[f"{question_type}_{metric}"] = per_question_type[metric].mean()
 
     output["object_rel_direction_accuracy"] = (
         sum(
@@ -113,6 +124,15 @@ def fuzzy_matching(pred):
 
 def exact_match(pred, target):
     return 1.0 if pred.lower() == target.lower() else 0.0
+
+def abs_dist_norm(pred, target):
+    return abs(pred - target) / target
+
+def mean_relative_accuracy(pred, target, start, end, interval):
+    num_pts = (end - start) / interval + 2
+    conf_intervs = np.linspace(start, end, int(num_pts))
+    accuracy = abs_dist_norm(pred, target) <= 1 - conf_intervs
+    return accuracy.mean()
 
 def to_float(pred):
     try:

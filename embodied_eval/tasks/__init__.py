@@ -6,7 +6,7 @@ import collections
 import random
 import math
 
-from datasets import Dataset, load_dataset, load_from_disk, DownloadMode
+from datasets import Dataset, load_dataset, load_from_disk, DownloadMode, DatasetDict
 from collections.abc import Callable
 from typing import Dict, List, Mapping, Optional, Union
 from dataclasses import asdict, dataclass, field
@@ -155,7 +155,6 @@ class Task(abc.ABC):
         else:
             if self.dataset_path.endswith(".json") or self.dataset_path.endswith(".jsonl"):
                 self.dataset = load_json(self.dataset_path)
-                # self.dataset = self.dataset[:4] # TODO
                 self.dataset = Dataset.from_list(self.dataset)
             elif self.dataset_path.endswith(".yaml"):
                 self.dataset = []
@@ -193,6 +192,15 @@ class Task(abc.ABC):
                     name=self.dataset_name,
                     trust_remote_code=True
                 )
+            
+            # TODO Debug
+            # if isinstance(self.dataset, dict):  
+            #     self.dataset = self.dataset["test"]
+            #     self.dataset = self.dataset.select(range(4))
+            #     self.dataset = DatasetDict({"test": self.dataset})
+            # else:
+            #     self.dataset = self.dataset.select(range(4))
+            
 
     def build_all_requests(
         self,
@@ -255,6 +263,10 @@ class Task(abc.ABC):
         kwargs = self.config.dataset_kwargs
         if callable(self.config.process_results):
             return self.config.process_results(doc, results, kwargs)
+    
+    def aggregate_results(self, value,):
+        if callable(self.config.metric_kwargs["aggregation"]):
+            return self.config.metric_kwargs["aggregation"](value)
 
 # ======================= Task Output =======================
 class TaskOutput:
@@ -267,8 +279,6 @@ class TaskOutput:
         self.task = task
         self.task_name = task_name
         self.task_config = task_config
-        self.sample_metrics = collections.defaultdict(list)
-        self.agg_metrics = collections.defaultdict(list)
         self.logged_samples = []
 
     @classmethod
@@ -280,18 +290,11 @@ class TaskOutput:
             task_config=task_config
         )
     
-    def calculate_aggregate_metric(self, bootstrap_iters=100000) -> None:
-        results = {}
+    def calculate_aggregate_metric(self) -> None:
+        agg_result = self.task.aggregate_results(self.logged_samples)
+        return agg_result
+        # self.agg_metrics[metric] = aggregation_for_metric(value, aggregation)
 
-        for metric, value in self.sample_metrics.items():
-            # agg_fn(value) --> score + std TODO
-            aggregation = self.task.config.metric_kwargs.get("aggregation", "mean")
-            self.agg_metrics[metric], self.agg_metrics[f"{metric}_stderr"] = aggregation_for_metric(value, aggregation)
-            
-            results[metric] = self.agg_metrics[metric]
-            results[f"{metric}_stderr"] = self.agg_metrics[f"{metric}_stderr"]
-
-        return results
 
 # ======================= Task Manager =======================
 

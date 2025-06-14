@@ -15,7 +15,6 @@ def SimpleEvaluate(
     model,
     eval_tasks,
     limit: Optional[Union[int, float]] = None,
-    bootstrap_iters: Optional[int] = 100000,
 ):
     results_dict = collections.defaultdict(dict)
     results = collections.defaultdict(dict)
@@ -46,19 +45,16 @@ def SimpleEvaluate(
 
         for doc_id, doc in doc_iterator:
             requests = instances_by_doc_id[doc_id]
-            metrics = task.process_results(doc, [req.resps for req in requests])
+            sample_result = task.process_results(doc, [req.resps for req in requests])
             
-            target = metrics.pop('target', None)
             example = {
                 "doc_id": doc_id,
                 "doc": requests[0].args[0],
-                "target": target,
                 "resps": [req.resps for req in requests],
             }
+            example.update({key:value for key,value in sample_result.items()})
             task_output.logged_samples.append(example)
 
-            for metric, value in metrics.items():
-                task_output.sample_metrics[metric].append(value)
             pbar.update(1)
         pbar.close()
 
@@ -84,27 +80,14 @@ def SimpleEvaluate(
                 task_output.logged_samples = list(itertools.chain.from_iterable(full_samples))
 
             eval_logger.info(f"Gathering sample across all ranks for: {task_output.task_name}")
-            
-            for metrics in task_output.sample_metrics:
-                metric_list = [None] * WORLD_SIZE if RANK == 0 else None
-                torch.distributed.gather_object(
-                    obj=task_output.sample_metrics[metrics],
-                    object_gather_list=metric_list,
-                    dst=0,
-                )
-                if RANK == 0:
-                    task_output.sample_metrics[metrics] = list(itertools.chain.from_iterable(metric_list))
-            
-            eval_logger.info(f"Gathering results across all ranks for: {task_output.task_name}")
-
         torch.distributed.barrier()  # Ensure all processes are synced before proceeding
 
     if RANK == 0:
         ### Aggregate results over all datapoints ###
         # aggregate results ; run bootstrap CIs
         for task_output in eval_tasks:
-            result = task_output.calculate_aggregate_metric(bootstrap_iters=bootstrap_iters)
-            results[task_output.task_name] = result
+            agg_result = task_output.calculate_aggregate_metric()
+            results[task_output.task_name] = agg_result
             configs[task_output.task_name] = task_output.task_config
             samples[task_output.task_name] = task_output.logged_samples
         
