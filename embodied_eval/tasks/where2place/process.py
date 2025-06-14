@@ -1,10 +1,12 @@
 import numpy as np
+import pandas as pd
 import os
 import re
 
 from PIL import Image
+from loguru import logger as eval_logger
 
-WHERE2PLACE_METRICS = {"acc"}
+METRICS_FOR_WHERE2PLACE = {"accuracy": "spatial_reference"}
 
 def where2place_doc_to_visual(doc, dataset_kwargs=None):
     image = []
@@ -28,26 +30,50 @@ def where2place_doc_to_text(doc, dataset_kwargs=None):
     return question
 
 def where2place_process_results(doc, results, dataset_kwargs=None):
-    acc = 0
-    try:
-        points = text2points(results[0].strip())
-    except:
-        print('Failed to parse answer for question', results)
-        return acc
-    
-    mask_image_path = os.path.join(dataset_kwargs["target_image_dir"], doc["image"])
-    mask = np.array(Image.open(mask_image_path)) / 255.
-    if len(points) > 0:
-        in_range = (points[:, 0] >= 0) & (points[:, 0] < mask.shape[1]) \
-                    & (points[:, 1] >= 0) & (points[:, 1] < mask.shape[0])
-        acc = np.concatenate([
-            mask[points[in_range, 1], points[in_range, 0]],
-            np.zeros(points.shape[0] - in_range.sum())
-        ]).mean()
-    
-    result_dict = {"target": mask_to_bbox(mask), "where2place_acc": acc}
+    doc["prediction"] = results[0]
 
-    return {key: value for key, value in result_dict.items()}
+    target = np.array(Image.open(os.path.join(dataset_kwargs["target_image_dir"], doc["image"]))) / 255.
+    result_dict = {"target": mask_to_bbox(target)}
+    result_dict["question_type"] = doc.get("question_type", "where2place")
+    
+    for key, value in METRICS_FOR_WHERE2PLACE.items():
+        doc[key] = eval(value)(doc["prediction"], target)
+        result_dict[key] = doc[key]
+
+    return result_dict
+
+def where2place_aggregate_results(results):
+    for r in results:
+        assert "question_type" in r, r
+    results = pd.DataFrame(results)
+
+    output = {}
+
+    for question_type, question_type_indexes in results.groupby("question_type").groups.items():
+        per_question_type = results.iloc[question_type_indexes]
+        for metric in METRICS_FOR_WHERE2PLACE.keys():
+            output[f"{question_type}_{metric}"] = per_question_type[metric].mean()
+    
+    output["overall"] = sum([_ for _ in output.values()]) / len(output)
+    eval_logger.info(f"Evaluation results: {output}")
+    return output
+
+
+def spatial_reference(pred, mask):
+    try:
+        points = text2points(pred.strip())
+        
+        if len(points) > 0:
+            in_range = (points[:, 0] >= 0) & (points[:, 0] < mask.shape[1]) \
+                        & (points[:, 1] >= 0) & (points[:, 1] < mask.shape[0])
+            acc = np.concatenate([
+                mask[points[in_range, 1], points[in_range, 0]],
+                np.zeros(points.shape[0] - in_range.sum())
+            ]).mean()
+            
+        return acc
+    except:
+        return 0
 
 def text2points(text, width=640, height=480):
     pattern = r"\(([-+]?\d+\.?\d*(?:,\s*[-+]?\d+\.?\d*)*?)\)"
