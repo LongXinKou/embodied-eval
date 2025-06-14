@@ -5,6 +5,7 @@ from tqdm import tqdm
 from PIL import Image
 
 from accelerate import Accelerator, DistributedType
+from decord import VideoReader, cpu
 from transformers import AutoProcessor, AutoModelForPreTraining
 from typing import List, Optional, Union
 from loguru import logger as eval_logger
@@ -12,6 +13,20 @@ from loguru import logger as eval_logger
 from embodied_eval.common.registry import register_model
 from embodied_eval.models import BaseAPIModel
 from embodied_eval.utils import Collator
+
+DEFAULT_IMAGE_TOKEN = "<image>"
+
+
+def load_video(video_path, max_frames_num):
+    if type(video_path) == str:
+        vr = VideoReader(video_path, ctx=cpu(0))
+    else:
+        vr = VideoReader(video_path[0], ctx=cpu(0))
+    total_frame_num = len(vr)
+    uniform_sampled_frames = np.linspace(0, total_frame_num - 1, max_frames_num, dtype=int)
+    frame_idx = uniform_sampled_frames.tolist()
+    spare_frames = vr.get_batch(frame_idx).asnumpy()
+    return spare_frames  # (frames, height, width, channels)
 
 @register_model("robobrain")
 class RoboBrain(BaseAPIModel):
@@ -35,6 +50,7 @@ class RoboBrain(BaseAPIModel):
             num_beams: Optional[int] = 1,
             use_cache: Optional[bool] = True,
             system_prompt: Optional[str] = None,
+            max_frames_num: int = 8,
             **kwargs,
     ) -> None:
         super().__init__()
@@ -84,6 +100,8 @@ class RoboBrain(BaseAPIModel):
         self.num_beams = num_beams
         self.use_cache = use_cache
         self.system_prompt = system_prompt
+
+        self.max_frames_num = max_frames_num
 
         # Set up distributed evaluation
         if accelerator.num_processes > 1:
@@ -186,40 +204,63 @@ class RoboBrain(BaseAPIModel):
                 gen_kwargs["use_cache"] = self.use_cache
 
             # Input (input_ids, attention_mask)
-            input_ids_list, attention_mask_list = [], []
+            inputs_list = []
             input_lengths = []
             for visual, context in zip(batch_visuals, batch_contexts): 
-                if self.system_prompt:
-                    message = [{"role": "system", "content": self.system_prompt}]
-                else:
-                    message = []
-                
-                content_parts = []
-                # For context   
-                content_parts.append({"type": "text", "text": context})
+                # For image
+                if isinstance(visual[0], Image.Image):
+                    task_type = "image"
+                    if DEFAULT_IMAGE_TOKEN not in context:
+                        image_tokens = [DEFAULT_IMAGE_TOKEN] * len(visual)
+                        context = f"{image_tokens}\n{context}"
+                    messages = [{"role": "user", "content": context}]
+                    if self.processor.tokenizer.chat_template is not None:
+                        text = self.processor.tokenizer.apply_chat_template(
+                            messages, 
+                            tokenize=False, 
+                            add_generation_prompt=True
+                        )
+                    
+                    images = [self._process_image(image) for image in visual]
+                    inputs = self.processor(
+                        images=images,
+                        text=text,
+                        return_tensors="pt"
+                    ).to(self.device, self.model.dtype)
+                elif isinstance(visual[0], str):
+                    task_type = "video"
+                    frames = load_video(visual, self.max_frames_num)
 
-                # For image, multi-image 
-                if isinstance(visual, str) and (visual.startswith("http")):
-                    content_parts.append({"type": "image", "url": visual})
-                elif isinstance(visual, (str, Image.Image, np.ndarray)):
-                    content_parts.append({"type": "image", "image": self._process_image(visual)})
-                
-                message.append({"role": "user", "content": content_parts})
-
-                inputs = self.processor.apply_chat_template(
-                    message, add_generation_prompt=True, tokenize=True, return_dict=True, return_tensors="pt"
-                )
-                input_ids_list.append(inputs['input_ids'])
-                attention_mask_list.append(inputs.get('attention_mask',inputs['input_ids'].ne(self.processor.tokenizer.pad_token_id)))
+                    if DEFAULT_IMAGE_TOKEN not in context:
+                        image_tokens = [DEFAULT_IMAGE_TOKEN] * len(frames)
+                        context = f"{image_tokens}\n{context}"
+                    messages = [{"role": "user", "content": context}]
+                    if self.processor.tokenizer.chat_template is not None:
+                        text = self.processor.tokenizer.apply_chat_template(
+                            messages, 
+                            tokenize=False, 
+                            add_generation_prompt=True
+                        )
+                    
+                    images = [self._process_image(frame) for frame in frames]
+                    inputs = self.processor(
+                        images=images,
+                        text=text,
+                        return_tensors="pt"
+                    ).to(self.device, self.model.dtype)
+                inputs_list.append(inputs)
                 input_lengths.append(inputs['input_ids'].shape[1])
-
-            input_ids = torch.cat(input_ids_list, dim=0).to(self.device)
-            attention_mask = torch.cat(attention_mask_list, dim=0).to(self.device)
+                
+            batch_inputs = {}
+            for key in inputs_list[0].keys():
+                batch_inputs[key] = torch.cat([inp[key] for inp in inputs_list], dim=0)
+            batch_inputs = {k: v.to(self.device) for k, v in batch_inputs.items()}
 
             # Generate output
+            # import inspect
+            # print(inspect.signature(self.model.generate))
             output = self.model.generate(
-                input_ids,
-                attention_mask=attention_mask,
+                **batch_inputs,
                 **gen_kwargs
             )
 
@@ -247,15 +288,11 @@ class RoboBrain(BaseAPIModel):
         return res
 
     def _process_image(self, image):
-        """Process image for model input."""
-        if isinstance(image, str):
-            try:
-                return Image.open(image).convert("RGB")
-            except Exception as e:
-                eval_logger.error(f"Error loading image {image}: {e}")
-                return None
-        elif isinstance(image, Image.Image):
+        """Process images for model input."""
+        if isinstance(image, Image.Image):
             return image.convert("RGB")
-        elif isinstance(image, np.ndarray):
+        elif isinstance(image, (np.ndarray)):
             return Image.fromarray(image).convert("RGB")
-        return None
+        else:
+            return None
+        
