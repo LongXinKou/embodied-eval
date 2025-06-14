@@ -60,6 +60,8 @@ class Llava_OneVision(BaseAPIModel):
             system_prompt: Optional[str] = None,
             model_name: Optional[str] = None,
             max_frames_num: Optional[int] = 32,
+            mm_spatial_pool_stride: Optional[int] = 2,
+            mm_spatial_pool_mode: Optional[str] = "bilinear",
             token_strategy: Optional[str] = "single",  # could be "single" or "multiple", "multiple" denotes adding multiple <image> tokens for each frame
             attn_implementation: Optional[str] = best_fit_attn_implementation,
             conv_template: Optional[str] = "qwen_1_5",
@@ -109,6 +111,8 @@ class Llava_OneVision(BaseAPIModel):
         self.conv_template = conv_template
         self.max_frames_num = max_frames_num
         self.token_strategy = token_strategy
+        self.mm_spatial_pool_stride = mm_spatial_pool_stride
+        self.mm_spatial_pool_mode = mm_spatial_pool_mode
 
         # Set up distributed evaluation
         if accelerator.num_processes > 1:
@@ -206,7 +210,7 @@ class Llava_OneVision(BaseAPIModel):
 
         # Determine the number of iterations required to process all requests
         num_iters = len(requests) // self.batch_size if len(requests) % self.batch_size == 0 else len(requests) // self.batch_size + 1
-        progress_bar = tqdm(total=num_iters, disable=(self.rank != 0), desc="RoboBrain Responding")
+        progress_bar = tqdm(total=num_iters, disable=(self.rank != 0), desc="LLaVA-OneVision Responding")
 
         for batch in batches:
             batch_contexts, all_gen_kwargs, batch_doc_to_visual, batch_doc_id, batch_task, batch_split = zip(*batch)

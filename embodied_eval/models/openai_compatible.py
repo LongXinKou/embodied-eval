@@ -23,7 +23,7 @@ class OpenAICompatible(BaseAPIModel):
             self,
             model_name_or_path: str = "gpt-4o",
             timeout: int = 10,
-            max_retries: int = 4,
+            max_retries: int = 5,
             batch_size: Optional[Union[int, str]] = 1,
             max_new_tokens: int = 1024,
             temperature: float = 0,
@@ -63,9 +63,14 @@ class OpenAICompatible(BaseAPIModel):
     def generate_until(self, requests) -> List[str]:
         """Generate text until a stopping sequence."""
         res = []
-        
-        batches = [reg.args for reg in requests]
-        progress_bar = tqdm(total=len(requests), disable=(self.rank != 0), desc="Model Responding")
+
+        def _no_sort(x):
+            return 0, x[0]  # 所有 key 都一样，相当于不排序
+
+        collator = Collator([req.args for req in requests], _no_sort, grouping=True)
+        batches = collator.get_batched(n=self.batch_size, batch_fn=None)
+        num_iters = len(requests) // self.batch_size if len(requests) % self.batch_size == 0 else len(requests) // self.batch_size + 1
+        progress_bar = tqdm(total=num_iters, disable=(self.rank != 0), desc="Model Responding")
 
         for batch in batches:
             contexts, all_gen_kwargs, doc_to_visual, doc_id, task, split = zip(*batch)

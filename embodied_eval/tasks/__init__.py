@@ -126,14 +126,14 @@ class Task(abc.ABC):
             if self.dataset_kwargs is not None:
                 return (self.config.doc_to_visual(doc, self.config.dataset_kwargs))
             else:
-                pass
+                return (self.config.doc_to_visual(doc))
     
     def doc_to_text(self, doc: dict):
         if callable(self.config.doc_to_text):
             if self.dataset_kwargs is not None:
                 return (self.config.doc_to_text(doc, self.config.dataset_kwargs))
             else:
-                pass
+                return (self.config.doc_to_text(doc))
 
     def doc_iterator(self, *, rank: int = 0, limit: Union[int, None] = None, world_size: int = 1):
         limit = int(limit) if limit else None
@@ -188,7 +188,11 @@ class Task(abc.ABC):
                         self.dataset.extend(cur_dataset)
                 self.dataset = Dataset.from_list(self.dataset)
             else:
-                self.dataset = load_from_disk(dataset_path=self.dataset_path)
+                self.dataset = load_dataset(
+                    path=self.dataset_path,
+                    name=self.dataset_name,
+                    trust_remote_code=True
+                )
 
     def build_all_requests(
         self,

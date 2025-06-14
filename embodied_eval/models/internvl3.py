@@ -170,17 +170,18 @@ class InternVL3(BaseAPIModel):
             self.device_map = device_map if device_map else device
 
         # Load model
-        eval_logger.info(f"Loading RoboBrain model from {model_name_or_path}")
+        eval_logger.info(f"Loading InternVL3 model from {model_name_or_path}")
         self._model = AutoModel.from_pretrained(
             model_name_or_path,
-            torch_dtype=torch.float16,
+            torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=True,
             device_map=self.device_map,
             trust_remote_code=True
         ).eval()
         self._tokenizer = AutoTokenizer.from_pretrained(
             model_name_or_path, 
-            trust_remote_code=True
+            device_map=self.device_map,
+            trust_remote_code=True,
         )
 
         # Store configuration
@@ -285,7 +286,7 @@ class InternVL3(BaseAPIModel):
             for visual, context in zip(batch_visuals, batch_contexts): 
                 if type(visual[0]) == Image.Image: 
                     task_type = "image"
-                    pixel_values_list = [load_image(img).to(torch.float16).to(self.device) for img in visual]
+                    pixel_values_list = [load_image(img).to(torch.bfloat16).to(self.device) for img in visual]
                     pixel_values = torch.cat(pixel_values_list, dim=0)
                     if len(visual) == 1:
                         image_token = "<image>"
