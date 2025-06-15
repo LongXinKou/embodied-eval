@@ -12,6 +12,7 @@ T = TypeVar("T", bound="BaseAPIModel")
 AVAILABLE_MODELS = {
     "internvl3": "InternVL3",
     "llava_onevision": "Llava_OneVision",
+    "qwen2_5_vl": "Qwen2_5_VL",
     "openai_compatible": "OpenAICompatible",
     "robobrain": "RoboBrain",
 }
