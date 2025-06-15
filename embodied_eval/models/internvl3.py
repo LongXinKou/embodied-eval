@@ -6,6 +6,7 @@ from PIL import Image
 import torchvision.transforms as T
 
 from accelerate import Accelerator, DistributedType
+from accelerate.state import AcceleratorState
 from decord import VideoReader, cpu
 from transformers import AutoTokenizer, AutoModel
 from torchvision.transforms.functional import InterpolationMode
@@ -160,6 +161,19 @@ class InternVL3(BaseAPIModel):
     ) -> None:
         super().__init__()
 
+        # Load model
+        eval_logger.info(f"Loading InternVL3 model from {model_name_or_path}")
+        self._model = AutoModel.from_pretrained(
+            model_name_or_path,
+            torch_dtype=torch.bfloat16,
+            low_cpu_mem_usage=True,
+            trust_remote_code=True
+        ).eval().cuda()
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            model_name_or_path, 
+            trust_remote_code=True,
+        )
+
         # Handle distributed setup
         accelerator = Accelerator()
         if accelerator.num_processes > 1:
@@ -168,21 +182,6 @@ class InternVL3(BaseAPIModel):
         else:
             self._device = torch.device(device)
             self.device_map = device_map if device_map else device
-
-        # Load model
-        eval_logger.info(f"Loading InternVL3 model from {model_name_or_path}")
-        self._model = AutoModel.from_pretrained(
-            model_name_or_path,
-            torch_dtype=torch.bfloat16,
-            low_cpu_mem_usage=True,
-            device_map=self.device_map,
-            trust_remote_code=True
-        ).eval()
-        self._tokenizer = AutoTokenizer.from_pretrained(
-            model_name_or_path, 
-            device_map=self.device_map,
-            trust_remote_code=True,
-        )
 
         # Store configuration
         self._config = self._model.config
@@ -201,8 +200,25 @@ class InternVL3(BaseAPIModel):
 
         # Set up distributed evaluation
         if accelerator.num_processes > 1:
-            self._model = accelerator.prepare_model(self._model, evaluation_mode=True)
+            assert accelerator.distributed_type in [DistributedType.FSDP, DistributedType.MULTI_GPU, DistributedType.DEEPSPEED], "Unsupported distributed type provided. Only DDP and FSDP are supported."
+            # If you want to use DistributedType.DEEPSPEED, you have to run accelerate config before using the model
+            # Also, you have to select zero stage 0 (equivalent to DDP) in order to make the prepare model works
+            # I tried to set different parameters in the kwargs to let default zero 2 stage works, but it didn't work.
+            if accelerator.distributed_type == DistributedType.DEEPSPEED:
+                kwargs = {
+                    "train_micro_batch_size_per_gpu": self.batch_size_per_gpu,
+                    "train_batch_size": self.batch_size_per_gpu * accelerator.num_processes,
+                }
+                AcceleratorState().deepspeed_plugin.deepspeed_config_process(must_match=True, **kwargs)
+                eval_logger.info("Detected that you are using DistributedType.DEEPSPEED. Make sure you run `accelerate config` and set zero stage to 0")
+
+            if accelerator.distributed_type == DistributedType.FSDP or accelerator.distributed_type == DistributedType.DEEPSPEED:
+                self._model = accelerator.prepare(self.model)
+            else:
+                self._model = accelerator.prepare_model(self.model, evaluation_mode=True)
             self.accelerator = accelerator
+            if self.accelerator.is_local_main_process:
+                eval_logger.info(f"Using {accelerator.num_processes} devices with data parallelism")
             self._rank = self.accelerator.local_process_index
             self._world_size = self.accelerator.num_processes
         else:
