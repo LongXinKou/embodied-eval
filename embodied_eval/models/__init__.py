@@ -15,6 +15,7 @@ AVAILABLE_MODELS = {
     "qwen2_5_vl": "Qwen2_5_VL",
     "openai_compatible": "OpenAICompatible",
     "robobrain": "RoboBrain",
+    "cosmos_reason1": "CosmosReason1",
 }
 
 class BaseAPIModel(abc.ABC):

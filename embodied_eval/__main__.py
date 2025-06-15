@@ -137,7 +137,7 @@ def print_results(results_dict, args):
     configs = results_dict["configs"]
     for task_name, _ in results.items():
         result, config = results[task_name], configs[task_name]
-        info = f"task:{config['task']}, data:{config['dataset_path']}/{config['dataset_kwargs']},\
+        info = f"task:{config['task']}, data:{config['dataset_path']}/{config.get('dataset_kwargs')},\
             generate:{config['generation_kwargs']}"
         eval_logger.info(info)
         make_table(result, args)

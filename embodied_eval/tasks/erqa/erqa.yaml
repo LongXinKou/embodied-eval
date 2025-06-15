@@ -1,6 +1,7 @@
 task: erqa
 dataset_path: /data/klx/hf_dataset/ERQA/
 load_from_disk: true
+eval_split: test
 doc_to_visual: !function process.erqa_doc_to_visual
 doc_to_text: !function process.erqa_doc_to_text
 doc_to_target: "answer"
