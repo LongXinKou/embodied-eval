@@ -240,13 +240,13 @@ class Llava_OneVision(BaseAPIModel):
             question_input = []
             for visual, context in zip(batch_visuals, batch_contexts): # for multi-modal task
                 # for multi image case, we treat per image aspect ratio as "pad" by default.
-                if len(visual) > 1 or "image_aspect_ratio" not in self._config.__dict__:  
+                if len(visual) > 1 and "image_aspect_ratio" not in self._config.__dict__:  
                     self._config.image_aspect_ratio = getattr(gen_kwargs, "image_aspect_ratio", "pad")
                     gen_kwargs.pop("image_aspect_ratio")
                     eval_logger.info(f"In Multi-Image setting, image aspect ratio: {self._config.image_aspect_ratio}")
 
                 # For image, multi-image tasks
-                if type(visual[0]) == Image.Image:  
+                if isinstance(visual[0], Image.Image):
                     image_tensor = process_images(visual, self._image_processor, self._config)
                     if type(image_tensor) is list:
                         image_tensor = [_image.to(dtype=torch.float16, device=self.device) for _image in image_tensor]
@@ -257,7 +257,7 @@ class Llava_OneVision(BaseAPIModel):
                     placeholder_count = len(visual) if isinstance(visual, list) else 1
                 
                 # For video task
-                elif type(visual[0]) == str: 
+                elif isinstance(visual[0], str):
                     image_tensor = []
                     try:
                         frames = self.load_video(visual, self.max_frames_num)

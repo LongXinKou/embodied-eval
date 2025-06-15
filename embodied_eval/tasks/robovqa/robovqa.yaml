@@ -1,0 +1,22 @@
+task: robovqa
+dataset_path: /data/klx/hf_dataset/robovqa/instructions/
+dataset_kwargs:
+  video_dir: /data/klx/hf_dataset/robovqa/gdm-robovqa/video/
+load_from_disk: true
+eval_split: val
+doc_to_visual: !function process.robovqa_doc_to_visual
+doc_to_text: !function process.robovqa_doc_to_text
+doc_to_target: "ground_truth"
+output_type: generate_until
+generation_kwargs:
+  max_new_tokens: 256
+  temperature: 0
+  do_sample: false
+  top_p: 1.0
+  num_beams: 1
+# metrics
+process_results: !function process.robovqa_process_results
+metric_kwargs:
+  metric: robovqa_score
+  aggregation: !function process.robovqa_aggregate_results
+  higher_is_better: true

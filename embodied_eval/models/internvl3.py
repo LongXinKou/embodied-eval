@@ -300,7 +300,7 @@ class InternVL3(BaseAPIModel):
                            else batch_doc_to_visual[0](self.task_dict[task][ids]) for ids in batch_doc_id]
             
             for visual, context in zip(batch_visuals, batch_contexts): 
-                if type(visual[0]) == Image.Image: 
+                if isinstance(visual[0], Image.Image):
                     task_type = "image"
                     pixel_values_list = [load_image(img).to(torch.bfloat16).to(self.device) for img in visual]
                     pixel_values = torch.cat(pixel_values_list, dim=0)
@@ -329,7 +329,7 @@ class InternVL3(BaseAPIModel):
                             return_history=True
                         )
 
-                elif type(visual[0]) == str: 
+                elif isinstance(visual[0], str):
                     task_type = "video"
                     video_path = visual[0]
                     pixel_values, num_patches_list = load_video(video_path, num_segments=self.num_frame)
