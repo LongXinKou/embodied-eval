@@ -183,8 +183,6 @@ class RoboBrain(BaseAPIModel):
                 until_from_kwargs = gen_kwargs.pop("until")
                 if isinstance(until_from_kwargs, str):
                     until = [until_from_kwargs]
-                elif isinstance(until_from_kwargs, list):
-                    until = until_from_kwargs
 
             batch_visuals = [batch_doc_to_visual[0](self.task_dict[task][split][ids]) if split is not None 
                            else batch_doc_to_visual[0](self.task_dict[task][ids]) for ids in batch_doc_id]

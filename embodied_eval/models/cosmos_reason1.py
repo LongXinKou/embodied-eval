@@ -38,6 +38,7 @@ class CosmosReason1(BaseAPIModel):
             num_beams: Optional[int] = 1,
             use_cache: Optional[bool] = True,
             system_prompt: Optional[str] = None,
+            max_num_frames: int = 32,
             **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -68,7 +69,12 @@ class CosmosReason1(BaseAPIModel):
         self.batch_size_per_gpu = int(batch_size)
         self.temperature = temperature
         self.do_sample = do_sample
+        self.top_p = top_p
+        self.num_beams = num_beams
+        self.use_cache = use_cache
         self.system_prompt = system_prompt
+
+        self.max_num_frames = max_num_frames
 
         # Set up distributed evaluation
         if accelerator.num_processes > 1:
@@ -136,7 +142,7 @@ class CosmosReason1(BaseAPIModel):
             split = batch_split[0]
             gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
 
-            until = [self.tokenizer.decode(self.eot_token_id)]
+            until = [self.processor.tokenizer.decode(self.eot_token_id)]
             if "until" in gen_kwargs:
                 gen_kwargs.pop("until")
                 if isinstance(until, str):
@@ -172,8 +178,6 @@ class CosmosReason1(BaseAPIModel):
                         processed_visuals.append({
                             "type": "video", 
                             "video": visual, 
-                            "max_pixels": self.max_pixels, 
-                            "min_pixels": self.min_pixels
                         })
                     elif isinstance(visual, Image.Image):  # Handle both single and multiple images
                         base64_image = visual.convert("RGB")
@@ -184,8 +188,6 @@ class CosmosReason1(BaseAPIModel):
                         processed_visuals.append({
                             "type": "image", 
                             "image": f"data:image/jpeg;base64,{base64_string}", 
-                            "max_pixels": self.max_pixels, 
-                            "min_pixels": self.min_pixels
                         })
                 message.append(
                     {
