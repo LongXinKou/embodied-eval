@@ -11,6 +11,14 @@
 1. 数据和模型的绝对路径 --> 相对路径
 2. ERQA --> tfrecore 2 huggingface 
 
+
+## 🔨 Setup
+```bash
+conda create -n embodied-eval python==3.10
+conda activate embodied-eval
+pip install -r requirements.txt
+```
+
 ## 🎁 Benchmark
 | Category               | Items     | Paper                                                                                                                                |
 |------------------------|-----------|--------------------------------------------------------------------------------------------------------------------------------------|
@@ -25,9 +33,3 @@
 | A-EQA                  | Explore-EQA | [Explore until Confident: Efficient Exploration for Embodied Question Answering](https://arxiv.org/pdf/2403.15941)                   |
 | EQA (plannig + action) | Embodied-Bench | [EMBODIEDBENCH: Comprehensive Benchmarking Multi-modal Large Language Models for Vision-Driven Embodied Agents](https://arxiv.org/pdf/2502.09560) |
 
-conda create -n embodied-eval python==3.10
-conda activate embodied-eval
-
-git clong https://github.com/LLaVA-VL/LLaVA-NeXT.git
-cd LLaVA-NeXT
-pip install -e . # llava-1.7.0.dev0
