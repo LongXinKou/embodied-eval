@@ -16,6 +16,7 @@ AVAILABLE_MODELS = {
     "openai_compatible": "OpenAICompatible",
     "robobrain": "RoboBrain",
     "cosmos_reason1": "CosmosReason1",
+    "robopoint": "RoboPoint",
 }
 
 class BaseAPIModel(abc.ABC):
