@@ -29,6 +29,7 @@ class OpenAICompatible(BaseAPIModel):
             top_p: Optional[int] = None,
             num_beams: int = 1,
             system_prompt: Optional[str] = None,
+            max_frames_num: int = 8,
             timeout: int = 10,
             max_retries: int = 5,
             max_size_in_mb: int = 20,
@@ -51,6 +52,7 @@ class OpenAICompatible(BaseAPIModel):
         self.num_beams = num_beams
         self.system_prompt = system_prompt
 
+        self.max_frames_num = max_frames_num
         self.max_size_in_mb = max_size_in_mb
         self.timeout = timeout
         self.max_retries = max_retries

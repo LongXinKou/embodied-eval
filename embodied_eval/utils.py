@@ -26,7 +26,11 @@ from loguru import logger as eval_logger
 def load_json(json_path):
     if json_path.endswith('.json'):
         with open(json_path, "r") as f:
-            return json.load(f)
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                f.seek(0)
+                return [json.loads(line) for line in f if line.strip()]
     elif json_path.endswith('.jsonl'):
         data = []
         with open(json_path, "r") as f:

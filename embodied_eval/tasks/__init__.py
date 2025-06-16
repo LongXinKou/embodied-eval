@@ -2,6 +2,7 @@ import abc
 import os
 import copy
 import collections
+import glob
 
 import random
 import math
@@ -154,7 +155,17 @@ class Task(abc.ABC):
             )
         else:
             if self.dataset_path.endswith(".json") or self.dataset_path.endswith(".jsonl"):
-                self.dataset = load_json(self.dataset_path)
+                if '*' in self.dataset_path:
+                    self.dataset = []
+                    for file_path in glob.glob(self.dataset_path):
+                        data = load_json(file_path)
+                        if isinstance(data, dict):
+                            self.dataset.append(data)
+                        else:
+                            self.dataset.extend(data)
+                else:
+                    self.dataset = load_json(self.dataset_path)
+                    
                 self.dataset = Dataset.from_list(self.dataset)
             elif self.dataset_path.endswith(".yaml"):
                 self.dataset = []
@@ -186,7 +197,7 @@ class Task(abc.ABC):
 
                         self.dataset.extend(cur_dataset)
                 self.dataset = Dataset.from_list(self.dataset)
-            else:
+            else:  # dir
                 self.dataset = load_dataset(
                     path=self.dataset_path,
                     name=self.dataset_name,
@@ -195,11 +206,11 @@ class Task(abc.ABC):
             
             # TODO Debug
             # if isinstance(self.dataset, dict):  
-            #     self.dataset = self.dataset["test"]
+            #     self.dataset = self.dataset["validation"]
             #     self.dataset = self.dataset.select(range(4))
-            #     self.dataset = DatasetDict({"test": self.dataset})
+            #     self.dataset = DatasetDict({"validation": self.dataset})
             # else:
-            #     self.dataset = self.dataset.select(range(4))
+            #     self.dataset = self.dataset.select(range(2))
             
 
     def build_all_requests(

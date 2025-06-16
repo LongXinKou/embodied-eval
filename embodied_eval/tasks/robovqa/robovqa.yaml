@@ -1,9 +1,9 @@
 task: robovqa
-dataset_path: /data/klx/hf_dataset/robovqa/instructions/
+dataset_path: /data/klx/hf_dataset/RoboVQA/
 dataset_kwargs:
-  video_dir: /data/klx/hf_dataset/robovqa/gdm-robovqa/video/
+  video_dir: /data/klx/hf_dataset/robovqa/gdm-robovqa/videos/
 load_from_disk: true
-eval_split: validation
+eval_split: val
 doc_to_visual: !function process.robovqa_doc_to_visual
 doc_to_text: !function process.robovqa_doc_to_text
 doc_to_target: "ground_truth"
