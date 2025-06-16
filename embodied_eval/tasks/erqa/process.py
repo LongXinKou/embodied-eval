@@ -31,7 +31,7 @@ def erqa_process_results(doc, results, dataset_kwargs=None):
     result_dict = {"target": target}
     result_dict["question_type"] = doc.get("question_type", "erqa")
     for key, value in METRICS_FOR_ERQA.items():
-        doc[key] = eval(value)(doc["prediction"], target)
+        doc[key] = eval(value)(fuzzy_matching(doc["prediction"]), target)
         result_dict[key] = doc[key]
 
     return result_dict
@@ -55,3 +55,6 @@ def erqa_aggregate_results(results):
 
 def exact_match(pred, target):
     return 1.0 if pred.lower() == target.lower() else 0.0
+
+def fuzzy_matching(pred):
+    return pred.split(" ")[0].rstrip(".").strip()
