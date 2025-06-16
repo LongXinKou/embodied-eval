@@ -3,7 +3,7 @@ dataset_path: /data/klx/hf_dataset/robovqa/instructions/
 dataset_kwargs:
   video_dir: /data/klx/hf_dataset/robovqa/gdm-robovqa/video/
 load_from_disk: true
-eval_split: val
+eval_split: validation
 doc_to_visual: !function process.robovqa_doc_to_visual
 doc_to_text: !function process.robovqa_doc_to_text
 doc_to_target: "ground_truth"
