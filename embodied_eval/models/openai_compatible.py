@@ -22,8 +22,6 @@ class OpenAICompatible(BaseAPIModel):
     def __init__(
             self,
             model_name_or_path: str = "gpt-4o",
-            timeout: int = 10,
-            max_retries: int = 5,
             batch_size: Optional[Union[int, str]] = 1,
             max_new_tokens: int = 1024,
             temperature: float = 0,
@@ -31,6 +29,9 @@ class OpenAICompatible(BaseAPIModel):
             top_p: Optional[int] = None,
             num_beams: int = 1,
             system_prompt: Optional[str] = None,
+            timeout: int = 10,
+            max_retries: int = 5,
+            max_size_in_mb: int = 20,
             **kwargs,
     ) -> None:
         super().__init__()
@@ -42,14 +43,17 @@ class OpenAICompatible(BaseAPIModel):
 
         # Store configuration
         self.model_name_or_path = model_name_or_path
-        self.timeout = timeout
-        self.max_retries = max_retries
+        self.batch_size = int(batch_size)
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.do_sample = do_sample
         self.top_p = top_p
         self.num_beams = num_beams
         self.system_prompt = system_prompt
+
+        self.max_size_in_mb = max_size_in_mb
+        self.timeout = timeout
+        self.max_retries = max_retries
     
     
     def flatten(self, input):
@@ -102,7 +106,7 @@ class OpenAICompatible(BaseAPIModel):
             payload = {"messages": []}
             payload["model"] = self.model_name_or_path
             payload["messages"].append({"role": "user", "content": []})
-            payload["messages"][0]["content"].append({"type": "text", "text": contexts})
+            payload["messages"][0]["content"].append({"type": "text", "text": contexts[0]})
             for img in imgs:
                 payload["messages"][0]["content"].append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}})
 
@@ -116,7 +120,7 @@ class OpenAICompatible(BaseAPIModel):
             payload["max_tokens"] = max_new_tokens
             payload["temperature"] = temperature
 
-            if "o1" in self.model_version or "o3" in self.model_version:
+            if "o1" in self.model_name_or_path or "o3" in self.model_name_or_path:
                 del payload["temperature"]
                 payload["reasoning_effort"] = "medium"
                 payload["response_format"] = {"type": "text"}

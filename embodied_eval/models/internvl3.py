@@ -156,7 +156,7 @@ class InternVL3(BaseAPIModel):
             num_beams: Optional[int] = 1,
             use_cache: Optional[bool] = True,
             system_prompt: Optional[str] = None,
-            num_frame: Optional[int] = 32,
+            num_frame: Optional[int] = 16,
             **kwargs,
     ) -> None:
         super().__init__()
@@ -256,6 +256,7 @@ class InternVL3(BaseAPIModel):
     def world_size(self):
         return self._world_size
     
+    @torch.no_grad()
     def generate_until(self, requests) -> List[str]:
         """Generate text until a stopping sequence."""
         res = []

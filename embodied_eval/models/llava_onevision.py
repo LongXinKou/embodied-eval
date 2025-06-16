@@ -59,7 +59,7 @@ class Llava_OneVision(BaseAPIModel):
             use_cache: Optional[bool] = True,
             system_prompt: Optional[str] = None,
             model_name: Optional[str] = None,
-            max_frames_num: Optional[int] = 32,
+            max_num_frames: Optional[int] = 32,
             mm_spatial_pool_stride: Optional[int] = 2,
             mm_spatial_pool_mode: Optional[str] = "bilinear",
             token_strategy: Optional[str] = "single",  # could be "single" or "multiple", "multiple" denotes adding multiple <image> tokens for each frame
@@ -109,7 +109,7 @@ class Llava_OneVision(BaseAPIModel):
         
         self.model_name = model_name
         self.conv_template = conv_template
-        self.max_frames_num = max_frames_num
+        self.max_num_frames = max_num_frames
         self.token_strategy = token_strategy
         self.mm_spatial_pool_stride = mm_spatial_pool_stride
         self.mm_spatial_pool_mode = mm_spatial_pool_mode
@@ -260,7 +260,7 @@ class Llava_OneVision(BaseAPIModel):
                 elif isinstance(visual[0], str):
                     image_tensor = []
                     try:
-                        frames = self.load_video(visual, self.max_frames_num)
+                        frames = self.load_video(visual, self.max_num_frames)
                         frames = self._image_processor.preprocess(frames, return_tensors="pt")["pixel_values"].half().cuda()
                         image_tensor.append(frames)
                     except Exception as e:
