@@ -3,6 +3,8 @@ dataset_path: /data/klx/hf_dataset/where2place/point_questions.jsonl
 dataset_kwargs:
   image_dir: /data/klx/hf_dataset/where2place/images/
   target_image_dir: /data/klx/hf_dataset/where2place/masks/
+  pre_prompt: You are an agent who reasons about free space and spatial relations.
+  post_prompt: Do not include any additional text in your answer other than the tuple (min_x, min_y, max_x, max_y).
 load_from_disk: true
 doc_to_visual: !function process.where2place_doc_to_visual
 doc_to_text: !function process.where2place_doc_to_text

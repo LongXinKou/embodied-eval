@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import os
 import re
+import json
 
 from PIL import Image
 from loguru import logger as eval_logger
@@ -21,12 +22,12 @@ def where2place_doc_to_text(doc, dataset_kwargs=None):
         "pre_prompt" in dataset_kwargs
         and dataset_kwargs["pre_prompt"] != ""
     ):
-        question = f"{dataset_kwargs['pre_prompt']}{question}"
+        question = f"{dataset_kwargs['pre_prompt']} {question}"
     if (
         "post_prompt" in dataset_kwargs
         and dataset_kwargs["post_prompt"] != ""
     ):
-        question = f"{question}{dataset_kwargs['post_prompt']}"
+        question = f"{question} {dataset_kwargs['post_prompt']}"
     return question
 
 def where2place_process_results(doc, results, dataset_kwargs=None):
@@ -59,9 +60,14 @@ def where2place_aggregate_results(results):
     return output
 
 
-def spatial_reference(pred, mask):
+def spatial_reference(pred, mask, width=640, height=480):
     try:
-        points = text2points(pred.strip())
+        points = text2points(pred.strip(), width=width, height=height)
+        if isinstance(mask, list) and len(mask) == 4:
+            x0, y0, x1, y1 = mask
+            binary_mask = np.zeros((height, width), dtype=bool)
+            binary_mask[y0:y1, x0:x1] = 1
+            mask = binary_mask
         
         if len(points) > 0:
             in_range = (points[:, 0] >= 0) & (points[:, 0] < mask.shape[1]) \
@@ -76,9 +82,10 @@ def spatial_reference(pred, mask):
         return 0
 
 def text2points(text, width=640, height=480):
+    points = []
+
     pattern = r"\(([-+]?\d+\.?\d*(?:,\s*[-+]?\d+\.?\d*)*?)\)"
     matches = re.findall(pattern, text)
-    points = []
     for match in matches:
         vector = [
             float(num) if '.' in num else int(num) for num in match.split(',')
@@ -100,6 +107,27 @@ def text2points(text, width=640, height=480):
             mask[y0:y1, x0:x1] = 1
             y, x = np.where(mask)
             points.extend(list(np.stack([x, y], axis=1)))
+    if points:
+        return np.array(points)
+    
+    try:
+        if '```' in text:
+            text_clean = text.split('```json')[-1].split('```')[0].strip()
+        else:
+            text_clean = text
+
+        data = json.loads(text_clean)
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict) and "point" in item:
+                    pt = item["point"]
+                    if isinstance(pt, list) and len(pt) == 2:
+                        x = int(pt[0] * width)
+                        y = int(pt[1] * height)
+                        points.append((x, y))
+    except Exception:
+        pass  # ignore JSON errors
+
     return np.array(points)
 
 def mask_to_bbox(mask, threshold=0.5):
@@ -113,3 +141,43 @@ def mask_to_bbox(mask, threshold=0.5):
     y0, y1 = ys.min(), ys.max()
 
     return (x0, y0, x1, y1)
+
+def post_process_results(sample_file_path, results_file_path):
+    import json
+    from collections import defaultdict
+    with open(sample_file_path, "r", encoding="utf-8") as f:
+        data = [json.loads(line) for line in f]
+
+    type_correct = defaultdict(float)
+    type_total = defaultdict(int)
+    for doc in data:
+        pred_raw = doc["resps"][0][0] if doc["resps"] and doc["resps"][0] else ""
+        target = doc["target"]
+        
+        acc = spatial_reference(pred_raw, target)
+        doc["accuracy"] = acc 
+        
+        qtype = doc["question_type"]
+        type_correct[qtype] += acc
+        type_total[qtype] += 1
+
+    with open(sample_file_path, "w", encoding="utf-8") as f:
+        for doc in data:
+            f.write(json.dumps(doc, ensure_ascii=False) + "\n")
+
+    type_success_rate = {
+        f"{qtype}_accuracy": round(type_correct[qtype] / type_total[qtype], 4)
+        for qtype in type_total
+    }
+    values = list(type_success_rate.values())
+    overall = round(sum(values) / len(values), 4)
+    type_success_rate["overall"] = overall
+
+    with open(results_file_path, "w", encoding="utf-8") as f:
+        json.dump(type_success_rate, f, ensure_ascii=False, indent=2)
+
+if __name__ == '__main__':
+    post_process_results(
+        sample_file_path="",
+        results_file_path=""
+    )
