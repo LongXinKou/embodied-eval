@@ -58,3 +58,45 @@ def exact_match(pred, target):
 
 def fuzzy_matching(pred):
     return pred.split(" ")[0].rstrip(".").strip()
+
+def post_process_results(sample_file_path, results_file_path):
+    import json
+    from collections import defaultdict
+    with open(sample_file_path, "r", encoding="utf-8") as f:
+        data = [json.loads(line) for line in f]
+
+    type_correct = defaultdict(float)
+    type_total = defaultdict(int)
+
+    for doc in data:
+        pred_raw = doc["resps"][0][0] if doc["resps"] and doc["resps"][0] else ""
+        pred_clean = fuzzy_matching(pred_raw)
+        target = doc["target"]
+        
+        acc = exact_match(pred_clean, target)
+        doc["accuracy"] = acc 
+        
+        qtype = doc["question_type"]
+        type_correct[qtype] += acc
+        type_total[qtype] += 1
+
+    with open(sample_file_path, "w", encoding="utf-8") as f:
+        for doc in data:
+            f.write(json.dumps(doc, ensure_ascii=False) + "\n")
+
+    type_success_rate = {
+        f"{qtype}_accuracy": round(type_correct[qtype] / type_total[qtype], 4)
+        for qtype in type_total
+    }
+    values = list(type_success_rate.values())
+    overall = round(sum(values) / len(values), 4)
+    type_success_rate["overall"] = overall
+
+    with open(results_file_path, "w", encoding="utf-8") as f:
+        json.dump(type_success_rate, f, ensure_ascii=False, indent=2)
+
+if __name__ == '__main__':
+    post_process_results(
+        sample_file_path="",
+        results_file_path=""
+    )
