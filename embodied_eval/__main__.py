@@ -160,19 +160,32 @@ def make_table(result, args):
             type_to_metrics[qtype][metric] = val
 
     all_metrics = sorted({m for v in type_to_metrics.values() for m in v})
-
-    headers = ["Metric"] + list(type_to_metrics.keys())
+    headers = ["Metric"] + list(type_to_metrics.keys()) + ["Average"] 
     value_matrix = []
 
+    # Initialize a dictionary to store metric averages
+    metric_averages = {}
     for metric in all_metrics:
         row = [metric]
+        metric_values = []
         for qtype in type_to_metrics:
             val = type_to_metrics[qtype].get(metric, "")
-            row.append(f"{val:.4f}" if val != "" else "")
+            if val != "":
+                row.append(f"{val:.4f}")
+                metric_values.append(val)
+            else:
+                row.append("")
+
+        avg = sum(metric_values) / len(metric_values) if metric_values else 0
+        row.append(f"{avg:.4f}")
         value_matrix.append(row)
 
-    # Step 4: 输出 markdown 表格
-    from pytablewriter import MarkdownTableWriter
+        # Store the average in the metric_averages dictionary
+        metric_averages[f"{metric}_average"] = avg
+
+    # Add the metric averages to the original result dictionary
+    result.update(metric_averages)
+    
     md_writer = MarkdownTableWriter()
     md_writer.table_name = f"Results for {model}"
     md_writer.headers = headers
