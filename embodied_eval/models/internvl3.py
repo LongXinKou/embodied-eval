@@ -144,7 +144,7 @@ class InternVL3(BaseAPIModel):
 
     def __init__(
             self,
-            model_name_or_path: str = "BAAI/RoboBrain",
+            model_name_or_path: str = "OpenGVLab/InternVL3-8B",
             device: Optional[str] = "cuda",
             device_map: Optional[str] = "cuda",
             max_length: Optional[int] = 2048,
@@ -303,7 +303,7 @@ class InternVL3(BaseAPIModel):
                     task_type = "image"
                     pixel_values_list = [load_image(img).to(torch.bfloat16).to(self.device) for img in visual]
                     pixel_values = torch.cat(pixel_values_list, dim=0)
-                    if len(visual) == 1:
+                    if len(visual) == 1: # single image
                         image_token = "<image>"
                         formatted_question = image_token + "\n" + context
                         response, history = self.model.chat(
@@ -314,9 +314,9 @@ class InternVL3(BaseAPIModel):
                             history=None, 
                             return_history=True
                         )
-                    else:
+                    else: # Multi images
                         num_patches_list = [pixel_value.size(0) for pixel_value in pixel_values_list]
-                        image_token = "".join([f"Image-{i+1}: <image>\n" for i in range(len(num_patches_list))]) # single image
+                        image_token = "".join([f"Image-{i+1}: <image>\n" for i in range(len(num_patches_list))]) 
                         formatted_question = image_token + "\n" + context
                         response, history = self.model.chat(
                             self.tokenizer, 

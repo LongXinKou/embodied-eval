@@ -206,9 +206,9 @@ class Task(abc.ABC):
             
             # TODO Debug
             # if isinstance(self.dataset, dict):  
-            #     self.dataset = self.dataset["validation"]
+            #     self.dataset = self.dataset["val"]
             #     self.dataset = self.dataset.select(range(4))
-            #     self.dataset = DatasetDict({"validation": self.dataset})
+            #     self.dataset = DatasetDict({"val": self.dataset})
             # else:
             #     self.dataset = self.dataset.select(range(2))
             
