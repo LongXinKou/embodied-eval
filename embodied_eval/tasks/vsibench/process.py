@@ -3,6 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 
+from collections import defaultdict
 from functools import partial
 from loguru import logger as eval_logger
 
@@ -80,14 +81,6 @@ def vsibench_process_results(doc, results, dataset_kwargs=None):
 
 
 def vsibench_aggregate_results(results):
-    """
-    Input
-        - results: Optional(list(dict))
-        [{question_type:, accuracy:,}, {...}]
-
-    Output
-        - {question-type_metric:, ..., overall: }
-    """
     for r in results:
         assert "question_type" in r, r
     results = pd.DataFrame(results)
@@ -114,6 +107,17 @@ def vsibench_aggregate_results(results):
         )
         / 3.0
     )
+
+    metric_to_values = defaultdict(list)
+    for key, val in output.items():
+        if "_" in key:
+            qtype, metric_name = key.rsplit("_", 1)
+            if isinstance(val, (float, int)):
+                metric_to_values[metric_name].append(val)
+    for metric_name, vals in metric_to_values.items():
+        if len(vals) > 0:
+            avg_val = sum(vals) / len(vals)
+            output[f"{metric_name}_average"] = avg_val
 
     output["overall"] = sum([_ for _ in output.values()]) / len(output)
     eval_logger.info(f"Evaluation results: {output}")

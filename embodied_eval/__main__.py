@@ -185,7 +185,7 @@ def make_table(result, args):
 
     # Add the metric averages to the original result dictionary
     result.update(metric_averages)
-    
+
     md_writer = MarkdownTableWriter()
     md_writer.table_name = f"Results for {model}"
     md_writer.headers = headers
