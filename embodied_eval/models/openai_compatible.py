@@ -106,11 +106,14 @@ class OpenAICompatible(BaseAPIModel):
                         imgs.extend(frames)
             
             payload = {"messages": []}
-            payload["model"] = self.model_name_or_path
+            if self.system_prompt:
+                payload["messages"].append({"role": "system", "content": {"type": "text", "text": self.system_prompt}})
             payload["messages"].append({"role": "user", "content": []})
             payload["messages"][0]["content"].append({"type": "text", "text": contexts[0]})
             for img in imgs:
                 payload["messages"][0]["content"].append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}})
+            
+            payload["model"] = self.model_name_or_path
 
             gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
             max_new_tokens = gen_kwargs.get("max_new_tokens", self.max_new_tokens)
@@ -118,7 +121,6 @@ class OpenAICompatible(BaseAPIModel):
             temperature = gen_kwargs.get("temperature", self.temperature)
             top_p = gen_kwargs.get("top_p", self.top_p)
             num_beams = gen_kwargs.get("num_beams", self.num_beams)
-
             payload["max_tokens"] = max_new_tokens
             payload["temperature"] = temperature
 

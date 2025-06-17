@@ -155,7 +155,6 @@ class InternVL3(BaseAPIModel):
             top_p: Optional[int] = None,
             num_beams: Optional[int] = 1,
             use_cache: Optional[bool] = True,
-            system_prompt: Optional[str] = None,
             num_frame: Optional[int] = 16,
             **kwargs,
     ) -> None:
@@ -194,7 +193,6 @@ class InternVL3(BaseAPIModel):
         self.top_p = top_p
         self.num_beams = num_beams
         self.use_cache = use_cache
-        self.system_prompt = system_prompt
 
         self.num_frame = num_frame
 
