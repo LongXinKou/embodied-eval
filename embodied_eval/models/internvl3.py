@@ -26,6 +26,16 @@ DEFAULT_GEN_KWARGS = dict(
     do_sample=False,
 )
 
+def build_transform(input_size):
+    MEAN, STD = IMAGENET_MEAN, IMAGENET_STD
+    transform = T.Compose([
+        T.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img),
+        T.Resize((input_size, input_size), interpolation=InterpolationMode.BICUBIC),
+        T.ToTensor(),
+        T.Normalize(mean=MEAN, std=STD)
+    ])
+    return transform
+
 def find_closest_aspect_ratio(aspect_ratio, target_ratios, width, height, image_size):
     best_ratio_diff = float('inf')
     best_ratio = (1, 1)
@@ -78,16 +88,6 @@ def dynamic_preprocess(image, min_num=1, max_num=12, image_size=448, use_thumbna
         thumbnail_img = image.resize((image_size, image_size))
         processed_images.append(thumbnail_img)
     return processed_images
-
-def build_transform(input_size):
-    MEAN, STD = IMAGENET_MEAN, IMAGENET_STD
-    transform = T.Compose([
-        T.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img),
-        T.Resize((input_size, input_size), interpolation=InterpolationMode.BICUBIC),
-        T.ToTensor(),
-        T.Normalize(mean=MEAN, std=STD)
-    ])
-    return transform
 
 def get_index(bound, fps, max_frame, first_idx=0, num_segments=32):
     if bound:
@@ -220,6 +220,7 @@ class InternVL3(BaseAPIModel):
             self._rank = self.accelerator.local_process_index
             self._world_size = self.accelerator.num_processes
         else:
+            eval_logger.info(f"Using single device: {self._device}")
             self._rank = 0
             self._world_size = 1
 
@@ -300,7 +301,6 @@ class InternVL3(BaseAPIModel):
             
             for visual, context in zip(batch_visuals, batch_contexts): 
                 if isinstance(visual[0], Image.Image):
-                    task_type = "image"
                     pixel_values_list = [load_image(img).to(torch.bfloat16).to(self.device) for img in visual]
                     pixel_values = torch.cat(pixel_values_list, dim=0)
                     if len(visual) == 1: # single image
@@ -329,7 +329,6 @@ class InternVL3(BaseAPIModel):
                         )
 
                 elif isinstance(visual[0], str):
-                    task_type = "video"
                     video_path = visual[0]
                     pixel_values, num_patches_list = load_video(video_path, num_segments=self.num_frame)
                     pixel_values = pixel_values.to(torch.bfloat16).cuda()

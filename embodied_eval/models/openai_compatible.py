@@ -26,10 +26,10 @@ class OpenAICompatible(BaseAPIModel):
             max_new_tokens: int = 1024,
             temperature: float = 0,
             do_sample: bool = False,
-            top_p: Optional[int] = None,
+            top_p: Optional[float] = None,
             num_beams: int = 1,
             system_prompt: Optional[str] = None,
-            max_frames_num: int = 8,
+            max_frames_num: int = 16,
             timeout: int = 10,
             max_retries: int = 5,
             max_size_in_mb: int = 20,
@@ -71,7 +71,7 @@ class OpenAICompatible(BaseAPIModel):
         res = []
 
         def _no_sort(x):
-            return 0, x[0]  # 所有 key 都一样，相当于不排序
+            return 0, x[0] 
 
         collator = Collator([req.args for req in requests], _no_sort, grouping=True)
         batches = collator.get_batched(n=self.batch_size, batch_fn=None)
@@ -82,9 +82,11 @@ class OpenAICompatible(BaseAPIModel):
             contexts, all_gen_kwargs, doc_to_visual, doc_id, task, split = zip(*batch)
             task = task[0]
             split = split[0]
+            gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
 
             visual_list = [doc_to_visual[0](self.task_dict[task][split][ids]) if split is not None 
                            else doc_to_visual[0](self.task_dict[task][ids]) for ids in doc_id]
+            
             if None in visual_list:
                 visual_list = []
                 imgs = []
@@ -101,21 +103,27 @@ class OpenAICompatible(BaseAPIModel):
                     elif isinstance(visual, str) and (".mp4" in visual or ".avi" in visual):
                         frames = self.encode_video(visual, self.max_frames_num)
                         imgs.extend(frames)
-                    elif isinstance(visual, list):
-                        frames = self.encode_video(visual, self.max_frames_num)
-                        imgs.extend(frames)
             
-            payload = {"messages": []}
+            payload = {
+                "model": self.model_name_or_path,
+                "messages": []
+            }
             if self.system_prompt:
-                payload["messages"].append({"role": "system", "content": {"type": "text", "text": self.system_prompt}})
-            payload["messages"].append({"role": "user", "content": []})
-            payload["messages"][0]["content"].append({"type": "text", "text": contexts[0]})
-            for img in imgs:
-                payload["messages"][0]["content"].append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}})
+                payload["messages"].append({
+                    "role": "system", 
+                    "content": {"type": "text", "text": self.system_prompt}
+                })
             
-            payload["model"] = self.model_name_or_path
+            processed_visuals = []
+            for img in imgs:
+                processed_visuals.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}})
+            
+            # TODO Interleaved
+            payload["messages"].append({
+                "role": "user",
+                "content": processed_visuals + [{"type": "text", "text": contexts[0]}]
+            })
 
-            gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
             max_new_tokens = gen_kwargs.get("max_new_tokens", self.max_new_tokens)
             do_sample = gen_kwargs.get("do_sample", self.do_sample)
             temperature = gen_kwargs.get("temperature", self.temperature)
