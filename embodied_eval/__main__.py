@@ -150,42 +150,28 @@ def make_table(result, args):
 
     type_to_metrics = {}
     for key, val in result.items():
-        if key == "overall" or key.endswith("_stderr"):
+        if key == "overall" or key.endswith("_stderr") or key.endswith("_average"):
             continue
-        match = re.match(r"(.+?)_([a-zA-Z0-9:.]+)$", key)
-        if match:
-            qtype, metric = match.groups()
-            if qtype not in type_to_metrics:
-                type_to_metrics[qtype] = {}
-            type_to_metrics[qtype][metric] = val
-
+        qtype, metric_name = key.rsplit("_", 1)
+        if qtype not in type_to_metrics:
+            type_to_metrics[qtype] = {}
+        type_to_metrics[qtype][metric_name] = val
+        
     all_metrics = sorted({m for v in type_to_metrics.values() for m in v})
     headers = ["Metric"] + list(type_to_metrics.keys()) + ["Average"] 
     value_matrix = []
 
-    # Initialize a dictionary to store metric averages
-    metric_averages = {}
     for metric in all_metrics:
         row = [metric]
-        metric_values = []
         for qtype in type_to_metrics:
             val = type_to_metrics[qtype].get(metric, "")
-            if val != "":
-                row.append(f"{val:.4f}")
-                metric_values.append(val)
-            else:
-                row.append("")
-
-        avg = sum(metric_values) / len(metric_values) if metric_values else 0
-        row.append(f"{avg:.4f}")
+            row.append(f"{val:.4f}" if val != "" else "")
+        avg_key = f"{metric}_average"
+        avg_val = result.get(avg_key, "")
+        row.append(f"{avg_val:.4f}" if avg_val != "" else "")
         value_matrix.append(row)
 
-        # Store the average in the metric_averages dictionary
-        metric_averages[f"{metric}_average"] = avg
-
     # Add the metric averages to the original result dictionary
-    result.update(metric_averages)
-
     md_writer = MarkdownTableWriter()
     md_writer.table_name = f"Results for {model}"
     md_writer.headers = headers

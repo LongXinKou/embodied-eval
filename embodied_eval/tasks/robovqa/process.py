@@ -2,14 +2,14 @@
 import os
 import numpy as np
 import re
-from collections import defaultdict
-import sacrebleu
 import pandas as pd
 
+from collections import defaultdict
 from loguru import logger as eval_logger
 
-
-METRICS_FOR_ROBOVQA = {"BELU": "BELU_Eval"}
+METRICS_FOR_ROBOVQA = {
+    "BELU": "BELU_Eval"
+}
 ROBOVQA_QUESTION_TYPES = [
     "past_description:freeform",
     "immediate_planning_with_context20:freeform",
@@ -95,6 +95,11 @@ def robovqa_aggregate_results(results):
     return output
 
 def BELU_Eval(pred_answer, answer):
+    '''
+    followed "https://github.com/google-deepmind/robovqa/blob/main/data_loading_and_eval.ipynb"
+    bleu = sacrebleu.sentence_bleu(answer, pred_answer)
+    '''
+    import sacrebleu
     bleu = sacrebleu.sentence_bleu(pred_answer, [answer])
     return bleu
 
@@ -115,7 +120,6 @@ def extract_yes_no(pred):
 
 def post_evaluate_results(sample_file_path, results_file_path):
     import json
-    from collections import defaultdict
     with open(sample_file_path, "r", encoding="utf-8") as f:
         data = [json.loads(line) for line in f]
 
@@ -151,6 +155,6 @@ def post_evaluate_results(sample_file_path, results_file_path):
 
 if __name__ == '__main__':
     post_evaluate_results(
-        sample_file_path="/data/klx/embodied-eval/logs/logs_robobrain/RoboVQA/samples_robovqa.json",
-        results_file_path="/data/klx/embodied-eval/logs/logs_robobrain/RoboVQA/results_robovqa.json"
+        sample_file_path="",
+        results_file_path=""
     )

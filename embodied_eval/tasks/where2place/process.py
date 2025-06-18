@@ -34,9 +34,9 @@ def where2place_doc_to_text(doc, dataset_kwargs=None):
 def where2place_process_results(doc, results, dataset_kwargs=None):
     doc["prediction"] = results[0]
 
-    target = np.array(Image.open(os.path.join(dataset_kwargs["target_image_dir"], doc["image"]))) / 255.
+    target = np.array(Image.open(os.path.join(dataset_kwargs["target_image_dir"], doc["masks"]))) / 255.
     result_dict = {"target": mask_to_bbox(target)}
-    result_dict["question_type"] = doc.get("question_type", "where2place")
+    result_dict["question_type"] = doc.get("question_type", "where2plsace")
     
     for key, value in METRICS_FOR_WHERE2PLACE.items():
         doc[key] = eval(value)(doc["prediction"], target)
