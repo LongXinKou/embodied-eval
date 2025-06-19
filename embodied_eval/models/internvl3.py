@@ -346,7 +346,9 @@ class InternVL3(BaseAPIModel):
                     )
                 res.append(response)
                 progress_bar.update(1)
+        
         # Reorder results to match original order
+        res = collator.get_original(res)
         progress_bar.close()
         return res
 

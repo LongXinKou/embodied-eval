@@ -156,6 +156,8 @@ class OpenAICompatible(BaseAPIModel):
             res.append(response_text)
             progress_bar.update(1)
 
+        # Reorder results to match original order
+        res = collator.get_original(res)
         progress_bar.close()
         return res
 
