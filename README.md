@@ -21,19 +21,6 @@ conda create -n embodied-eval python==3.10
 conda activate embodied-eval
 pip install -r requirements.txt
 ```
-2. Install llava & qwen_vl_utils
-```
-git clone https://github.com/LLaVA-VL/LLaVA-NeXT.git
-cd LLaVA-NeXT
-pip install -e . --no-deps # llava 1.7.0.dev0 
-
-pip install qwen_vl_utils
-```
-3. RoboPoint
-```
-pip install sentencepiece
-pip install protobuf
-```
 
 ## 🎁 Benchmark
 | Category               | Items     | Paper                                                                                                                                |
