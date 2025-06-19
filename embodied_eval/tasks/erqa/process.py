@@ -1,3 +1,7 @@
+'''
+modified from "https://github.com/embodiedreasoning/ERQA/blob/main/eval_harness.py"
+is_correct = response_text.replace(".", "").strip().lower() == answer.strip().lower()
+'''
 import os
 
 import numpy as np
@@ -32,7 +36,7 @@ def erqa_process_results(doc, results, dataset_kwargs=None):
     result_dict = {"target": target}
     result_dict["question_type"] = doc.get("question_type", "erqa")
     for key, value in METRICS_FOR_ERQA.items():
-        doc[key] = eval(value)(fuzzy_matching(doc["prediction"]), target)
+        doc[key] = eval(value)(doc["prediction"], target)
         result_dict[key] = doc[key]
 
     return result_dict
@@ -65,11 +69,8 @@ def erqa_aggregate_results(results):
     eval_logger.info(f"Evaluation results: {output}")
     return output
 
-def exact_match(pred, target):
-    return 1.0 if pred.lower() == target.lower() else 0.0
-
-def fuzzy_matching(pred):
-    return pred.split(" ")[0].rstrip(".").strip()
+def exact_match(response_text, answer):
+    return response_text.replace(".", "").strip().lower() == answer.strip().lower()
 
 def post_evaluate_results(sample_file_path, results_file_path):
     import json
@@ -83,7 +84,7 @@ def post_evaluate_results(sample_file_path, results_file_path):
         question_type = doc["question_type"]
 
         for key, value in METRICS_FOR_ERQA.items():
-            doc[key] = eval(value)(fuzzy_matching(pred_raw), target)
+            doc[key] = eval(value)(pred_raw, target)
 
             result_dict = {
                 "question_type": question_type,

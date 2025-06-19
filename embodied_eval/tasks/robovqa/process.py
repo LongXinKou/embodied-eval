@@ -1,4 +1,8 @@
-
+'''
+modified from "https://github.com/google-deepmind/robovqa/blob/main/data_loading_and_eval.ipynb"
+bleu = sacrebleu.sentence_bleu(answer, pred_answer)
+1. remove discrete question for BELU2-4
+'''
 import os
 import numpy as np
 import re
@@ -95,10 +99,6 @@ def robovqa_aggregate_results(results):
     return output
 
 def BELU_Eval(pred_answer, answer):
-    '''
-    followed "https://github.com/google-deepmind/robovqa/blob/main/data_loading_and_eval.ipynb"
-    bleu = sacrebleu.sentence_bleu(answer, pred_answer)
-    '''
     import sacrebleu
     bleu = sacrebleu.sentence_bleu(pred_answer, [answer])
     return bleu
