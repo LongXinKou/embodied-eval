@@ -314,7 +314,19 @@ class InternVL3(BaseAPIModel):
                             history=None, 
                             return_history=True
                         )
-                    else: # Multi images
+                    else: 
+                        # combined multi images
+                        # image_token = "<image>"
+                        # formatted_question = image_token + "\n" + context
+                        # response, history = self.model.chat(
+                        #     self.tokenizer, 
+                        #     pixel_values, 
+                        #     formatted_question, 
+                        #     gen_kwargs, 
+                        #     history=None, 
+                        #     return_history=True
+                        # )
+                        # separate multi images
                         num_patches_list = [pixel_value.size(0) for pixel_value in pixel_values_list]
                         image_token = "".join([f"Image-{i+1}: <image>\n" for i in range(len(num_patches_list))]) 
                         formatted_question = image_token + "\n" + context
