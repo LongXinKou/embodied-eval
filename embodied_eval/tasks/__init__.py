@@ -31,6 +31,8 @@ class TaskConfig(dict):
     load_from_disk: bool = False
     eval_split: str = None
     dataset_kwargs: dict = None
+    # Simulator options: whether use simulator, and which simulator to use
+    use_simulator: bool = False
     # Formatting
     doc_to_visual: Union[Callable, str] = None
     doc_to_text: Union[Callable, str] = None
@@ -207,7 +209,7 @@ class Task(abc.ABC):
             # TODO Debug
             # if isinstance(self.dataset, dict):  
             #     self.dataset = self.dataset["val"]
-            #     self.dataset = self.dataset.select(range(4))
+            #     self.dataset = self.dataset.select(range(2))
             #     self.dataset = DatasetDict({"val": self.dataset})
             # else:
             #     self.dataset = self.dataset.select(range(2))
