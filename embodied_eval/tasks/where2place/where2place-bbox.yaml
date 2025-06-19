@@ -1,11 +1,10 @@
-task: where2place
-dataset_path: /data/klx/hf_dataset/where2place/point_questions.jsonl
+task: where2place-bbox
+dataset_path: /data/klx/hf_dataset/where2place/
 dataset_kwargs:
-  image_dir: /data/klx/hf_dataset/where2place/images/
-  target_image_dir: /data/klx/hf_dataset/where2place/masks/
   pre_prompt: You are an agent who reasons about free space and spatial relations.
-  post_prompt: Do not include any additional text in your answer other than the tuple (min_x, min_y, max_x, max_y).
+  post_prompt: Your answer should be a tuple (min_x, max_x, min_y, max_y) indicating the bounding box of the target region. min_x, max_x, min_y, max_y are normalized image coordinates between 0 and 1.
 load_from_disk: true
+eval_split: test
 doc_to_visual: !function process.where2place_doc_to_visual
 doc_to_text: !function process.where2place_doc_to_text
 doc_to_target: "id"

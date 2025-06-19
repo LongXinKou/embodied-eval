@@ -1,3 +1,9 @@
+'''
+modified from
+"https://github.com/wentaoyuan/RoboPoint/blob/master/robopoint/eval/summarize_vqa.py"
+1. origin masks array is not binary
+'''
+
 import numpy as np
 import pandas as pd
 import os
@@ -11,14 +17,10 @@ from loguru import logger as eval_logger
 METRICS_FOR_WHERE2PLACE = {"accuracy": "spatial_reference"}
 
 def where2place_doc_to_visual(doc, dataset_kwargs=None):
-    image = []
-    image_path = os.path.join(dataset_kwargs["image_dir"], doc["image"])
-    
-    image.append(Image.open(image_path).convert("RGB"))
-    return image
+    return [doc["image"].convert("RGB")]
 
 def where2place_doc_to_text(doc, dataset_kwargs=None):
-    question = doc["text"]
+    question = doc["question"]
     if (
         "pre_prompt" in dataset_kwargs
         and dataset_kwargs["pre_prompt"] != ""
@@ -34,9 +36,9 @@ def where2place_doc_to_text(doc, dataset_kwargs=None):
 def where2place_process_results(doc, results, dataset_kwargs=None):
     doc["prediction"] = results[0]
 
-    target = np.array(Image.open(os.path.join(dataset_kwargs["target_image_dir"], doc["masks"]))) / 255.
+    target = np.array(doc["mask"]) / 255.
     result_dict = {"target": mask_to_bbox(target)}
-    result_dict["question_type"] = doc.get("question_type", "where2plsace")
+    result_dict["question_type"] = doc.get("question_type", "where2place")
     
     for key, value in METRICS_FOR_WHERE2PLACE.items():
         doc[key] = eval(value)(doc["prediction"], target)
@@ -72,7 +74,7 @@ def where2place_aggregate_results(results):
     return output
 
 
-def spatial_reference(pred, mask, width=640, height=480):
+def spatial_reference(pred, mask, width=640, height=480, threshold=0.5):
     try:
         points = text2points(pred.strip(), width=width, height=height)
         if isinstance(mask, list) and len(mask) == 4:
@@ -80,6 +82,9 @@ def spatial_reference(pred, mask, width=640, height=480):
             binary_mask = np.zeros((height, width), dtype=bool)
             binary_mask[y0:y1, x0:x1] = 1
             mask = binary_mask
+        elif isinstance(mask, np.ndarray): 
+            if mask.dtype != bool:
+                mask = mask > threshold
         
         if len(points) > 0:
             in_range = (points[:, 0] >= 0) & (points[:, 0] < mask.shape[1]) \
@@ -94,10 +99,9 @@ def spatial_reference(pred, mask, width=640, height=480):
         return 0
 
 def text2points(text, width=640, height=480):
-    points = []
-
     pattern = r"\(([-+]?\d+\.?\d*(?:,\s*[-+]?\d+\.?\d*)*?)\)"
     matches = re.findall(pattern, text)
+    points = []
     for match in matches:
         vector = [
             float(num) if '.' in num else int(num) for num in match.split(',')
@@ -119,26 +123,6 @@ def text2points(text, width=640, height=480):
             mask[y0:y1, x0:x1] = 1
             y, x = np.where(mask)
             points.extend(list(np.stack([x, y], axis=1)))
-    if points:
-        return np.array(points)
-    
-    try:
-        if '```' in text:
-            text_clean = text.split('```json')[-1].split('```')[0].strip()
-        else:
-            text_clean = text
-
-        data = json.loads(text_clean)
-        if isinstance(data, list):
-            for item in data:
-                if isinstance(item, dict) and "point" in item:
-                    pt = item["point"]
-                    if isinstance(pt, list) and len(pt) == 2:
-                        x = int(pt[0] * width)
-                        y = int(pt[1] * height)
-                        points.append((x, y))
-    except Exception:
-        pass  # ignore JSON errors
 
     return np.array(points)
 
