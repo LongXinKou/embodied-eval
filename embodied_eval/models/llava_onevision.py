@@ -86,6 +86,8 @@ class Llava_OneVision(BaseAPIModel):
 
         # Load model
         eval_logger.info(f"Loading LLaVA-OneVision model from {model_name_or_path}")
+        model_name = get_model_name_from_path(model_name_or_path) if model_name is None else model_name
+        eval_logger.info(f"Model name is {model_name}")
         self._tokenizer, self._model, self._image_processor, self._max_length = load_pretrained_model(
             model_path=model_name_or_path,
             model_base=None,
@@ -234,8 +236,21 @@ class Llava_OneVision(BaseAPIModel):
             if "use_cache" not in gen_kwargs:
                 gen_kwargs["use_cache"] = self.use_cache
 
-            batch_visuals = [batch_doc_to_visual[0](self.task_dict[task][split][ids]) if split is not None 
-                           else batch_doc_to_visual[0](self.task_dict[task][ids]) for ids in batch_doc_id]
+            batch_visuals = []
+            for ids in batch_doc_id:
+                doc_to_visual = batch_doc_to_visual[0]
+                if split is not None:
+                    visuals = doc_to_visual(self.task_dict[task][split][ids])
+                    if isinstance(visuals, tuple): # ([visual], [visual_index])
+                        batch_visuals.append(visuals[0])
+                    else:
+                        batch_visuals.append(visuals) # [visual]
+                else:
+                    visuals = doc_to_visual(self.task_dict[task][ids])
+                    if isinstance(visuals, tuple):
+                        batch_visuals.append(visuals[0])
+                    else:
+                        batch_visuals.append(visuals)
             
             question_input = []
             for visual, context in zip(batch_visuals, batch_contexts): # for multi-modal task
@@ -260,7 +275,7 @@ class Llava_OneVision(BaseAPIModel):
                 elif isinstance(visual[0], str):
                     image_tensor = []
                     try:
-                        frames = self.load_video(visual, self.max_num_frames)
+                        frames = self.load_video(visual, self.max_frames_num)
                         frames = self._image_processor.preprocess(frames, return_tensors="pt")["pixel_values"].half().cuda()
                         image_tensor.append(frames)
                     except Exception as e:

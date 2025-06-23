@@ -69,35 +69,27 @@ class OpenAICompatible(BaseAPIModel):
     def generate_until(self, requests) -> List[str]:
         """Generate text until a stopping sequence."""
         res = []
+        progress_bar = tqdm(total=len(requests), disable=(self.rank != 0), desc="Model Responding")
 
-        def _no_sort(x):
-            return 0, x[0] 
-
-        collator = Collator([req.args for req in requests], _no_sort, grouping=True)
-        batches = collator.get_batched(n=self.batch_size, batch_fn=None)
-        num_iters = len(requests) // self.batch_size if len(requests) % self.batch_size == 0 else len(requests) // self.batch_size + 1
-        progress_bar = tqdm(total=num_iters, disable=(self.rank != 0), desc="Model Responding")
-
-        for batch in batches:
-            contexts, all_gen_kwargs, doc_to_visual, doc_id, task, split = zip(*batch)
-            task = task[0]
-            split = split[0]
-            gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
-
-            visual_list = [doc_to_visual[0](self.task_dict[task][split][ids]) if split is not None 
-                           else doc_to_visual[0](self.task_dict[task][ids]) for ids in doc_id]
+        for contexts, gen_kwargs, doc_to_visual, doc_id, task, split in [reg.args for reg in requests]:
+            visual_list = doc_to_visual(self.task_dict[task][split][doc_id]) if split is not None else doc_to_visual(self.task_dict[task][doc_id])
             
-            if None in visual_list:
-                visual_list = []
-                imgs = []
+            visual_indices = []
+            imgs = []  # multiple images or frames for video
+
+            # ([PIL.Image,..], [index,...]), [PIL.Image, PIL.Image, ..]
+            if isinstance(visual_list, dict) and isinstance(visual_list[0][0], Image.Image) and isinstance(visual_list[1][0], int):
+                has_index = True
             else:
-                visual_list = self.flatten(visual_list)
-                imgs = []  # multiple images or frames for video
-                for visual in visual_list:
-                    if isinstance(visual, str) and (".jpg" in visual or ".jpeg" in visual or ".png" in visual or ".gif" in visual or ".bmp" in visual or ".tiff" in visual or ".webp" in visual):
-                        img = self.encode_image(visual)
-                        imgs.append(img)
-                    elif isinstance(visual, Image.Image):
+                has_index = False
+            
+            for visual in visual_list:
+                if has_index:
+                    img, idx = visual
+                    imgs.extend(img)
+                    visual_indices.extend(idx)
+                else:
+                    if isinstance(visual, Image.Image):
                         img = self.encode_image(visual)
                         imgs.append(img)
                     elif isinstance(visual, str) and (".mp4" in visual or ".avi" in visual):
@@ -113,15 +105,16 @@ class OpenAICompatible(BaseAPIModel):
                     "role": "system", 
                     "content": {"type": "text", "text": self.system_prompt}
                 })
-            
-            processed_visuals = []
-            for img in imgs:
-                processed_visuals.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}})
-            
-            # TODO Interleaved
+
+            content = self.build_message_content(
+                question=contexts,
+                pil_images=imgs,
+                visual_indices=visual_indices
+            )
+
             payload["messages"].append({
                 "role": "user",
-                "content": processed_visuals + [{"type": "text", "text": contexts[0]}]
+                "content": content
             })
 
             max_new_tokens = gen_kwargs.get("max_new_tokens", self.max_new_tokens)
@@ -137,7 +130,7 @@ class OpenAICompatible(BaseAPIModel):
                 payload["reasoning_effort"] = "medium"
                 payload["response_format"] = {"type": "text"}
                 payload.pop("max_tokens")
-                payload["max_completion_tokens"] = gen_kwargs["max_tokens"]
+                payload["max_completion_tokens"] = max_new_tokens
             
             for attempt in range(self.max_retries):
                 try:
@@ -157,7 +150,6 @@ class OpenAICompatible(BaseAPIModel):
             progress_bar.update(1)
 
         # Reorder results to match original order
-        res = collator.get_original(res)
         progress_bar.close()
         return res
 
@@ -209,3 +201,58 @@ class OpenAICompatible(BaseAPIModel):
             base64_frames.append(base64_str)
 
         return base64_frames
+    
+    def build_message_content(
+        self, 
+        question: str, 
+        pil_images: List[Image.Image], 
+        visual_indices: List[int]
+    ) -> List[dict]:
+        def is_base64_encoded(s):
+            try:
+                return s.rstrip('=') == base64.b64encode(base64.b64decode(s, validate=True)).decode("utf-8").rstrip('=')
+            except Exception:
+                return False
+        contents = []
+        if len(visual_indices) == 0 or all(idx == 0 for idx in visual_indices):
+            contents.extend(pil_images)
+            contents.append(question)
+        else:
+            image_index_pairs = list(zip(pil_images, visual_indices))
+            image_index_pairs.sort(key=lambda x: x[1])
+            last_pos = 0
+            for img, idx in image_index_pairs:
+                if idx == 0:
+                    contents.append(img)
+                elif idx <= len(question):
+                    text_segment = question[last_pos:idx]
+                    if text_segment:
+                        contents.append(text_segment)
+                    contents.append(img)
+                    last_pos = idx
+                else:
+                    contents.append(img)
+            if last_pos < len(question):
+                contents.append(question[last_pos:])
+            if not contents:
+                contents.append(question)
+                contents.extend(img for img, _ in image_index_pairs)
+
+        # Convert to OpenAI-style interleaved content
+        interleaved = []
+        for item in contents:
+            if isinstance(item, str):
+                if is_base64_encoded(item):
+                    interleaved.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{item}"}
+                    })
+                else:
+                    interleaved.append({"type": "text", "text": item})
+            elif isinstance(item, Image.Image):
+                base64_img = self.encode_image(item)
+                interleaved.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{base64_img}"}
+                })
+        return interleaved

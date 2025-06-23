@@ -204,8 +204,21 @@ class PhysVLM(BaseAPIModel):
             if "use_cache" not in gen_kwargs:
                 gen_kwargs["use_cache"] = self.use_cache
 
-            batch_visuals = [batch_doc_to_visual[0](self.task_dict[task][split][ids]) if split is not None 
-                           else batch_doc_to_visual[0](self.task_dict[task][ids]) for ids in batch_doc_id]
+            batch_visuals = []
+            for ids in batch_doc_id:
+                doc_to_visual = batch_doc_to_visual[0]
+                if split is not None:
+                    visuals = doc_to_visual(self.task_dict[task][split][ids])
+                    if isinstance(visuals, tuple): # ([visual], [visual_index])
+                        batch_visuals.append(visuals[0])
+                    else:
+                        batch_visuals.append(visuals) # [visual]
+                else:
+                    visuals = doc_to_visual(self.task_dict[task][ids])
+                    if isinstance(visuals, dict):
+                        batch_visuals.append(visuals[0])
+                    else:
+                        batch_visuals.append(visuals)
             
             question_input = []
             for visual, context in zip(batch_visuals, batch_contexts): # for multi-modal task

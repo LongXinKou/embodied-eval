@@ -1,6 +1,13 @@
 
 ## 🔨 Setup
 
+### embodiedgpt
+```
+git clone https://github.com/EmbodiedGPT/EmbodiedGPT_Pytorch.git
+cd EmbodiedGPT_Pytorch
+pip install -e . --no-deps # robohusky-0.1.0
+```
+
 ### llava
 ```
 git clone https://github.com/LLaVA-VL/LLaVA-NeXT.git
