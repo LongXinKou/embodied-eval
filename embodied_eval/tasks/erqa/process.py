@@ -24,7 +24,11 @@ ERQA_QUESTION_TYPES = [
 ]
 
 def erqa_doc_to_visual(doc, dataset_kwargs=None):
-    return doc["images"]
+    if len(doc["visual_indices"]) == 0:
+        return doc["images"]
+    else:
+        return (doc["images"], doc["visual_indices"])
+
 
 def erqa_doc_to_text(doc, dataset_kwargs=None):
     return doc["question"]

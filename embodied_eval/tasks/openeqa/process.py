@@ -30,7 +30,7 @@ OPENEQA_EMEQA_QUESTION_TYPES = [
 ]
 
 def openeqa_emeqa_doc_to_visual(doc, dataset_kwargs=None):
-    video_path = os.path.join(dataset_kwargs["video_dir"], doc["episode_history"])
+    video_path = os.path.join(dataset_kwargs["video_dir"], f'{doc["episode_history"]}.mp4')
     if os.path.exists(video_path):
         video_path = video_path
     else:
@@ -55,7 +55,7 @@ def openeqa_emeqa_process_results(doc, results, dataset_kwargs=None):
     result_dict["question_type"] = question_type
 
     for key, value in METRICS_FOR_OPENEQA_EMEQA.items():
-        score = eval(value)(pred_raw, target)
+        score = eval(value)(doc["question"], target, pred_raw)
         doc[key] = {key: score}
         result_dict[key] = doc[key]
 
@@ -72,7 +72,9 @@ def openeqa_emeqa_aggregate_results(results):
         per_question_type = results.iloc[question_type_indexes]
         if question_type in OPENEQA_EMEQA_QUESTION_TYPES:
             for metric in METRICS_FOR_OPENEQA_EMEQA.keys():
-                output[f"{question_type}_{metric}"] = per_question_type[metric].mean()
+                metric_data = per_question_type[metric].tolist()
+                avg_score = np.mean([x[metric] for x in metric_data])
+                output[f"{question_type}_{metric}"] = avg_score
     
     metric_to_values = defaultdict(list)
     for key, val in output.items():

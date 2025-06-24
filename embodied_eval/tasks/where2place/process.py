@@ -99,6 +99,43 @@ def spatial_reference(pred, mask, width=640, height=480, threshold=0.5):
         return 0
 
 def text2points(text, width=640, height=480):
+    """
+    Parse a given text to extract spatial points represented either as 
+    normalized coordinates (e.g., [0.6, 0.5]) or absolute pixel coordinates 
+    (e.g., (320, 240) or bounding boxes), and convert them to pixel-based 2D points.
+
+    Supports:
+    1. JSON-formatted output with "point": [x, y] where x, y ∈ [0, 1]
+    2. Tuple-like patterns (x, y) or (x0, y0, x1, y1)
+
+    Args:
+        text (str): Input text potentially containing spatial point descriptions in 
+                    normalized JSON or tuple format.
+        width (int): Width of the target image space for scaling normalized coordinates.
+        height (int): Height of the target image space for scaling normalized coordinates.
+
+    Returns:
+        np.ndarray: An array of shape (N, 2) containing 2D point coordinates in pixel space.
+
+    Example:
+        Input: 
+        text = 'Locations: [{"point": [0.5, 0.5]}, {"point": [0.25, 0.75]}]'
+        Output:
+        array([[320, 240], [160, 360]])
+    """
+    json_match = re.search(r"\[\s*\{[\s\S]*?\}\s*\]", text)
+    if json_match:
+        try:
+            data = json.loads(json_match.group())
+            for item in data:
+                if "point" in item and isinstance(item["point"], list) and len(item["point"]) == 2:
+                    x, y = item["point"]
+                    x_pixel = int(x * width)
+                    y_pixel = int(y * height)
+                    points.append((x_pixel, y_pixel))
+        except json.JSONDecodeError:
+            pass  # fallback to regex parsing if JSON fails
+    
     pattern = r"\(([-+]?\d+\.?\d*(?:,\s*[-+]?\d+\.?\d*)*?)\)"
     matches = re.findall(pattern, text)
     points = []

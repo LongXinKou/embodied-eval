@@ -2,6 +2,7 @@
 modified from "https://github.com/google-deepmind/robovqa/blob/main/data_loading_and_eval.ipynb"
 bleu = sacrebleu.sentence_bleu(answer, pred_answer)
 1. remove discrete question for BELU2-4
+2. smooth_method='exp' (Method 7) <- "https://github.com/unira-zwj/PhysVLM/issues/2"
 '''
 import os
 import numpy as np
@@ -49,10 +50,7 @@ def robovqa_process_results(doc, results, dataset_kwargs=None):
     result_dict = {"target": target}
     result_dict["question_type"] = question_type
     for key, value in METRICS_FOR_ROBOVQA.items():
-        if "discrete" in result_dict["question_type"]:
-            pred = extract_yes_no(pred_raw)
-        else:
-            pred = pred_raw
+        pred = pred_raw
         score = eval(value)(pred, target)
         doc[key] = {'score': score.score, 'precisions': score.precisions, "bp": score.bp}
         result_dict[key] = doc[key]
@@ -78,6 +76,7 @@ def robovqa_aggregate_results(results):
                 output[f"{question_type}_{metric}"] = avg_score
                 output[f"{question_type}_{metric}-bp"] = avg_bp
                 output[f"{question_type}_{metric}1"] = avg_precisions[0]
+
                 if 'freeform' in question_type:
                     output[f"{question_type}_{metric}2"] = avg_precisions[1]
                     output[f"{question_type}_{metric}3"] = avg_precisions[2]
@@ -100,7 +99,11 @@ def robovqa_aggregate_results(results):
 
 def BELU_Eval(pred_answer, answer):
     import sacrebleu
-    bleu = sacrebleu.sentence_bleu(pred_answer, [answer])
+    bleu = sacrebleu.sentence_bleu(
+        pred_answer, 
+        [answer],
+        smooth_method='exp'
+    )
     return bleu
 
 def extract_task_type_tags(task_type_string: str) -> list:

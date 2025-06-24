@@ -17,6 +17,6 @@ generation_kwargs:
 # metrics
 process_results: !function process.openeqa_emeqa_process_results
 metric_kwargs:
-  metric: robovqa_score
+  metric: llm_match_score
   aggregation: !function process.openeqa_emeqa_aggregate_results
   higher_is_better: true
