@@ -1,6 +1,15 @@
 
 ## 🔨 Setup
 
+### flash-attention
+```
+# Directly
+pip install flash-attn --no-build-isolation
+
+# [Option] install the per-commit wheel built by that PR, "https://github.com/Dao-AILab/flash-attention/releases"
+pip install flash-attn-xxx.whl
+```
+
 ### llava
 ```
 git clone https://github.com/LLaVA-VL/LLaVA-NeXT.git
@@ -46,4 +55,9 @@ if is_flash_attn_2_available():
 modeling_husky_embody2.py(line 392): 
 ```python
 # _keep_in_fp32_modules = ["wo"]
+```
+(3) Error during evaluation: 'HuskyQFormerFlashAttention2' object has no attribute 'embed_size'.
+replace embed_size with embed_dim in modeling_husky_embody2.py line 838.
+```python
+context_layer = attn_output.reshape(bsz, tgt_len, embed_dim).contiguous()
 ```
