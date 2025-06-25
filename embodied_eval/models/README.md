@@ -7,10 +7,10 @@
 pip install flash-attn --no-build-isolation
 
 # [Option] install the per-commit wheel built by that PR, "https://github.com/Dao-AILab/flash-attention/releases"
-pip install flash-attn-xxx.whl
+pip install flash_attn-2.7.3+cu12torch2.5cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 ```
 
-### llava
+### LLaVA-Next
 ```
 git clone https://github.com/LLaVA-VL/LLaVA-NeXT.git
 cd LLaVA-NeXT
@@ -60,4 +60,12 @@ modeling_husky_embody2.py(line 392):
 replace embed_size with embed_dim in modeling_husky_embody2.py line 838.
 ```python
 context_layer = attn_output.reshape(bsz, tgt_len, embed_dim).contiguous()
+```
+
+### SpatialVLM
+based on llava1.5
+```
+git clone https://github.com/haotian-liu/LLaVA.git
+cd LLaVA
+pip install -e . --no-deps # llava 1.7.0.dev0 
 ```
