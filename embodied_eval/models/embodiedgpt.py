@@ -57,11 +57,16 @@ class StoppingCriteriaSub(StoppingCriteria):
         self.stops = stops
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs):
+        device = input_ids.device
         for stop in self.stops:
-            if torch.all((stop == input_ids[0][-len(stop):])).item():
-                return True
-
+            stop = stop.to(device)
+            stop_len = len(stop)
+            for seq in input_ids:
+                if stop_len <= len(seq):
+                    if torch.all(stop == seq[-stop_len:]).item():
+                        return True
         return False
+
 
 @register_model("embodiedgpt")
 class EmbodiedGPT(BaseAPIModel):
@@ -308,8 +313,8 @@ class EmbodiedGPT(BaseAPIModel):
                 if isinstance(visual[0], Image.Image):
                     modal_type = "image"
                     pixel_values = self.load_image(visual)
-                    pixel_values = pixel_values.unsqueeze(0).to(dtype=torch.float16, device=self.device)
-                    language_model_inputs = self.model.extract_feature(pixel_values) # TODO
+                    pixel_values = pixel_values.to(dtype=torch.float16, device=self.device)
+                    language_model_inputs = self.model.extract_feature(pixel_values)
 
                 # For video task
                 elif isinstance(visual[0], str):
@@ -343,16 +348,7 @@ class EmbodiedGPT(BaseAPIModel):
 
             stop_words = ["Human: ", "Assistant: ", "###", "\n\n"]
             stop_words_ids = [self.tokenizer(stop_word, return_tensors='pt')['input_ids'].squeeze() for stop_word in stop_words]
-            stopping_criteria = StoppingCriteriaList([StoppingCriteriaSub(stops=stop_words_ids)])
-            generation_config = GenerationConfig(
-                bos_token_id=1,
-                pad_token_id=0,
-                do_sample=gen_kwargs["do_sample"],
-                top_p=gen_kwargs["top_p"],
-                temperature=gen_kwargs["temperature"],
-                max_new_tokens=gen_kwargs["max_new_tokens"],
-                stopping_criteria=stopping_criteria
-            )
+            gen_kwargs["stopping_criteria"] = StoppingCriteriaList([StoppingCriteriaSub(stops=stop_words_ids)])
 
             try:
                 with torch.inference_mode():
@@ -361,9 +357,9 @@ class EmbodiedGPT(BaseAPIModel):
                         attention_mask=attention_mask,
                         pixel_values=pixel_values,
                         language_model_inputs=language_model_inputs,
-                        generation_config=generation_config,
                         return_dict_in_generate=True,
-                        output_scores=True
+                        output_scores=True,
+                        **gen_kwargs,
                     )
                 preds = generation_output.sequences
                 text_outputs = self.tokenizer.batch_decode(preds, skip_special_tokens=True)

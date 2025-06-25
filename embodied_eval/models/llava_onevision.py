@@ -64,7 +64,7 @@ class Llava_OneVision(BaseAPIModel):
             mm_spatial_pool_mode: Optional[str] = "bilinear",
             token_strategy: Optional[str] = "single",  # could be "single" or "multiple", "multiple" denotes adding multiple <image> tokens for each frame
             attn_implementation: Optional[str] = best_fit_attn_implementation,
-            conv_template: Optional[str] = "qwen_1_5",
+            conv_mode: Optional[str] = "qwen_1_5",
             **kwargs,
     ) -> None:
         super().__init__()
@@ -110,11 +110,13 @@ class Llava_OneVision(BaseAPIModel):
         self.system_prompt = system_prompt
         
         self.model_name = model_name
-        self.conv_template = conv_template
         self.max_num_frames = max_num_frames
         self.token_strategy = token_strategy
         self.mm_spatial_pool_stride = mm_spatial_pool_stride
         self.mm_spatial_pool_mode = mm_spatial_pool_mode
+
+        self.conv_mode = conv_mode
+        self.conv_templates = conv_templates[self.conv_mode]
 
         # Set up distributed evaluation
         if accelerator.num_processes > 1:
@@ -168,14 +170,6 @@ class Llava_OneVision(BaseAPIModel):
     def world_size(self):
         return self._world_size
     
-    def tok_encode(self, string: str, left_truncate_len=None, add_special_tokens=None) -> List[int]:
-        """ """
-        add_special_tokens = False if add_special_tokens is None else add_special_tokens
-        encoding = self.tokenizer.encode(string, add_special_tokens=add_special_tokens)
-        # left-truncate the encoded context to be at most `left_truncate_len` tokens long
-        if left_truncate_len:
-            encoding = encoding[-left_truncate_len:]
-        return encoding
     
     def pad_sequence(self, input_ids, batch_first, padding_value):
         if self.tokenizer.padding_side == "left":
@@ -202,7 +196,7 @@ class Llava_OneVision(BaseAPIModel):
 
         def _sort_by_context_length(x):
             # Sort by context length for better batching
-            toks = self.tok_encode(x[0])
+            toks = self.tokenizer.encode(x[0])
             return -len(toks), x[0]
         
         # Initialize the Collator to group requests and sort them by context length
@@ -275,7 +269,7 @@ class Llava_OneVision(BaseAPIModel):
                 elif isinstance(visual[0], str):
                     image_tensor = []
                     try:
-                        frames = self.load_video(visual, self.max_frames_num)
+                        frames = self.load_video(visual, max_frames_num=self.max_num_frames)
                         frames = self._image_processor.preprocess(frames, return_tensors="pt")["pixel_values"].half().cuda()
                         image_tensor.append(frames)
                     except Exception as e:
@@ -294,7 +288,7 @@ class Llava_OneVision(BaseAPIModel):
                     question = context
                 
                 # For conv template
-                conv = conv_templates[self.conv_template].copy()
+                conv = self.conv_templates.copy()
                 conv.append_message(conv.roles[0], question)
                 conv.append_message(conv.roles[1], None)
                 prompt_question = conv.get_prompt()

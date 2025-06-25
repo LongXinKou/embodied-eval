@@ -145,6 +145,7 @@ class InternVL3(BaseAPIModel):
     def __init__(
             self,
             model_name_or_path: str = "OpenGVLab/InternVL3-8B",
+            use_flash_attn: str =False,
             device: Optional[str] = "cuda",
             device_map: Optional[str] = "cuda",
             max_length: Optional[int] = 2048,
@@ -156,6 +157,7 @@ class InternVL3(BaseAPIModel):
             num_beams: Optional[int] = 1,
             use_cache: Optional[bool] = True,
             num_frame: Optional[int] = 16,
+            max_num: Optional[int] = 12,
             **kwargs,
     ) -> None:
         super().__init__()
@@ -165,6 +167,7 @@ class InternVL3(BaseAPIModel):
         self._model = AutoModel.from_pretrained(
             model_name_or_path,
             torch_dtype=torch.bfloat16,
+            use_flash_attn=use_flash_attn,  
             low_cpu_mem_usage=True,
             trust_remote_code=True
         ).eval().cuda()
@@ -195,6 +198,7 @@ class InternVL3(BaseAPIModel):
         self.use_cache = use_cache
 
         self.num_frame = num_frame
+        self.max_num = max_num
 
         # Set up distributed evaluation
         if accelerator.num_processes > 1:
@@ -314,7 +318,7 @@ class InternVL3(BaseAPIModel):
             
             for visual, context in zip(batch_visuals, batch_contexts): 
                 if isinstance(visual[0], Image.Image):
-                    pixel_values_list = [load_image(img).to(torch.bfloat16).to(self.device) for img in visual]
+                    pixel_values_list = [load_image(img, max_num=self.max_num).to(torch.bfloat16).to(self.device) for img in visual]
                     pixel_values = torch.cat(pixel_values_list, dim=0)
                     if len(visual) == 1: # single image
                         image_token = "<image>"
@@ -343,6 +347,25 @@ class InternVL3(BaseAPIModel):
                         num_patches_list = [pixel_value.size(0) for pixel_value in pixel_values_list]
                         image_token = "".join([f"Image-{i+1}: <image>\n" for i in range(len(num_patches_list))]) 
                         formatted_question = image_token + "\n" + context
+                        with torch.inference_mode():
+                            response, history = self.model.chat(
+                                self.tokenizer, 
+                                pixel_values, 
+                                formatted_question, 
+                                gen_kwargs, 
+                                num_patches_list=num_patches_list, 
+                                history=None, 
+                                return_history=True
+                            )
+
+                elif isinstance(visual[0], str):
+                    video_path = visual[0]
+                    pixel_values, num_patches_list = load_video(video_path, num_segments=self.num_frame)
+                    pixel_values = pixel_values.to(torch.bfloat16).cuda()
+                    # Frame1: <image>\nFrame2: <image>\n...\nFrame8: <image>\n{question}
+                    video_prefix = "".join([f"Frame{i+1}: <image>\n" for i in range(len(num_patches_list))])
+                    formatted_question = video_prefix + context
+                    with torch.inference_mode():
                         response, history = self.model.chat(
                             self.tokenizer, 
                             pixel_values, 
@@ -352,25 +375,9 @@ class InternVL3(BaseAPIModel):
                             history=None, 
                             return_history=True
                         )
-
-                elif isinstance(visual[0], str):
-                    video_path = visual[0]
-                    pixel_values, num_patches_list = load_video(video_path, num_segments=self.num_frame)
-                    pixel_values = pixel_values.to(torch.bfloat16).cuda()
-                    # Frame1: <image>\nFrame2: <image>\n...\nFrame8: <image>\n{question}
-                    video_prefix = "".join([f"Frame{i+1}: <image>\n" for i in range(len(num_patches_list))])
-                    formatted_question = video_prefix + context
-                    response, history = self.model.chat(
-                        self.tokenizer, 
-                        pixel_values, 
-                        formatted_question, 
-                        gen_kwargs, 
-                        num_patches_list=num_patches_list, 
-                        history=None, 
-                        return_history=True
-                    )
                 res.append(response)
                 progress_bar.update(1)
+                torch.cuda.empty_cache()
         
         # Reorder results to match original order
         res = collator.get_original(res)
