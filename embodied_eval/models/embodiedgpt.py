@@ -205,24 +205,18 @@ class EmbodiedGPT(BaseAPIModel):
     def world_size(self):
         return self._world_size
     
-    def load_image(self, images, input_size=224):
-        new_images = []
-        
-        for image in images:
-            crop_pct = 224 / 256
-            size = int(input_size / crop_pct)
-            transform = T.Compose([
-                T.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img),
-                T.Resize(size, interpolation=InterpolationMode.BICUBIC),
-                T.CenterCrop(input_size),
-                T.ToTensor(),
-                T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
-            ])
-            new_images.append(transform(image))
-        
-        if all(x.shape == new_images[0].shape for x in new_images):
-            new_images = torch.stack(new_images, dim=0)
-        return new_images
+    def load_image(self, image, input_size=224):
+        crop_pct = 224 / 256
+        size = int(input_size / crop_pct)
+        transform = T.Compose([
+            T.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img),
+            T.Resize(size, interpolation=InterpolationMode.BICUBIC),
+            T.CenterCrop(input_size),
+            T.ToTensor(),
+            T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
+        ])
+        image = transform(image)
+        return image
 
     def load_video(self, video_path, num_segments=8):
         vr = VideoReader(video_path, ctx=cpu(0))
@@ -312,18 +306,22 @@ class EmbodiedGPT(BaseAPIModel):
                 # For image tasks
                 if isinstance(visual[0], Image.Image):
                     modal_type = "image"
-                    pixel_values = self.load_image(visual)
-                    pixel_values = pixel_values.to(dtype=torch.float16, device=self.device)
-                    language_model_inputs = self.model.extract_feature(pixel_values)
-
+                    pixel_values = [self.load_image(img) for img in visual]
+                    # FIXME max_num_frame=8
+                    if len(pixel_values) > self.max_num_frames:
+                        pixel_values = pixel_values[:self.max_num_frames]
+                    pixel_values = torch.cat(pixel_values, dim=0)
+                    if len(visual) > 1:
+                        TC, H, W = pixel_values.shape
+                        pixel_values = pixel_values.reshape(TC // 3, 3, H, W).transpose(0, 1)
                 # For video task
                 elif isinstance(visual[0], str):
                     modal_type = "video"
                     pixel_values = self.load_video(visual[0], self.max_num_frames)
                     TC, H, W = pixel_values.shape
                     pixel_values = pixel_values.reshape(TC // 3, 3, H, W).transpose(0, 1)
-                    pixel_values = pixel_values.unsqueeze(0).to(dtype=torch.float16, device=self.device)
-                    language_model_inputs = self.model.extract_feature(pixel_values)
+                pixel_values = pixel_values.unsqueeze(0).to(dtype=torch.float16, device=self.device)
+                language_model_inputs = self.model.extract_feature(pixel_values)
 
                 if modal_type == "image":
                     question = self.image_query + "\n" + context
