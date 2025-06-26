@@ -21,6 +21,7 @@ AVAILABLE_MODELS = {
     "cosmos_reason1": "CosmosReason1",
     "embodiedgpt": "EmbodiedGPT",
     "robopoint": "RoboPoint",
+    "spatialvlm": "SpatialVLM"
 }
 
 class BaseAPIModel(abc.ABC):

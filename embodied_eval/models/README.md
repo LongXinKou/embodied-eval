@@ -61,11 +61,3 @@ replace embed_size with embed_dim in modeling_husky_embody2.py line 838.
 ```python
 context_layer = attn_output.reshape(bsz, tgt_len, embed_dim).contiguous()
 ```
-
-### SpatialVLM
-based on llava1.5
-```
-git clone https://github.com/haotian-liu/LLaVA.git
-cd LLaVA
-pip install -e . --no-deps # llava 1.7.0.dev0 
-```
