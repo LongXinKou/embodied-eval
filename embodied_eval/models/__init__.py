@@ -16,6 +16,7 @@ AVAILABLE_MODELS = {
     "qwen2_5_vl": "Qwen2_5_VL",
     "vila": "VILA",
     "openai_compatible": "OpenAICompatible",
+    "openai_async_compatible": "OpenAIAsyncCompatible",
     "robobrain": "RoboBrain",
     "physvlm": "PhysVLM",
     "cosmos_reason1": "CosmosReason1",
