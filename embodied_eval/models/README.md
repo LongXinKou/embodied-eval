@@ -18,10 +18,21 @@ pip install -e . --no-deps # llava 1.7.0.dev0
 ```
 
 ### VILA
+need to install `llava` from VILA repo instead of LLaVA or LLaVA-Next.
 ```
+pip uninstall llava
 git clone https://github.com/NVlabs/VILA.git
 cd VILA
 pip install -e . --no-deps # vila-2.0.0
+```
+(1) cannot import name 'Qwen2FlashAttention2' from 'transformers.models.qwen2.modeling_qwen2'
+```
+pip install transformers==4.46.0
+```
+(2) Error during evaluation: Cannot use chat template functions because tokenizer.chat_template is not set and no template argument was passed!
+add `chat_template` to tokenizer_config.json of VILA1.5.
+```json
+"chat_template": "{% if messages[0]['role'] != 'system' %}{{ '<|im_start|>system\nYou are a helpful assistant<|im_end|>\n' }}{% endif %}{% for message in messages if message['content'] is not none %}{{ '<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n' }}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}",
 ```
 
 ### robopint
