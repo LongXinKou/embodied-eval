@@ -13,13 +13,12 @@ from typing import List, Optional, Union
 
 from embodied_eval.common.registry import register_model
 from embodied_eval.models import BaseAPIModel
-from embodied_eval.utils import Collator
 
-from openai import OpenAI
+import asyncio
+from openai import AsyncOpenAI
 
-
-@register_model("openai_compatible")
-class OpenAICompatible(BaseAPIModel):
+@register_model("openai_async_compatible")
+class OpenAIAsyncCompatible(BaseAPIModel):
     def __init__(
             self,
             model_name_or_path: str = "gpt-4o",
@@ -37,10 +36,8 @@ class OpenAICompatible(BaseAPIModel):
             **kwargs,
     ) -> None:
         super().__init__()
-                                                                                                                                                                                                        
-        httpx_client = httpx.Client(verify=False)
-        self.client = OpenAI(
-            http_client=httpx_client,
+
+        self.async_client = AsyncOpenAI(
             api_key = os.getenv("OPENAI_API_KEY"), 
             base_url = os.getenv("OPENAI_API_BASE")
         )
@@ -59,103 +56,107 @@ class OpenAICompatible(BaseAPIModel):
         self.max_size_in_mb = max_size_in_mb
         self.timeout = timeout
         self.max_retries = max_retries
-    
-    
-    def flatten(self, input):
-        """Helper method to flatten a list of lists into a single list."""
-        new_list = []
-        for i in input:
-            for j in i:
-                new_list.append(j)
-        return new_list
+        self.sema = asyncio.Semaphore(5)
+
 
     def generate_until(self, requests) -> List[str]:
-        """Generate text until a stopping sequence."""
-        res = []
         progress_bar = tqdm(total=len(requests), disable=(self.rank != 0), desc="Model Responding")
 
-        for contexts, gen_kwargs, doc_to_visual, doc_id, task, split in [reg.args for reg in requests]:
-            visual_list = doc_to_visual(self.task_dict[task][split][doc_id]) if split is not None else doc_to_visual(self.task_dict[task][doc_id])
-            
-            visual_indices = []
-            imgs = []  # multiple images or frames for video
+        async def _batch_async():
+            tasks = []
+            for reg in requests:
+                contexts, gen_kwargs, doc_to_visual, doc_id, task, split = reg.args
+                tasks.append(self._answer_async(contexts, gen_kwargs, doc_to_visual, doc_id, task, split))
 
-            # ([PIL.Image,..], [index,...]), [PIL.Image, PIL.Image, ..]
-            if isinstance(visual_list, dict) and isinstance(visual_list[0][0], Image.Image) and isinstance(visual_list[1][0], int):
-                has_index = True
-            else:
-                has_index = False
-            
+            results = []
+            for fut in asyncio.as_completed(tasks):
+                result = await fut
+                results.append(result)
+                progress_bar.update(1)
+            return results
+
+        results = list(asyncio.run(_batch_async()))
+        progress_bar.close()
+        return results
+
+    async def _answer_async(self, contexts, gen_kwargs, doc_to_visual, doc_id, task, split):
+        visual_list = doc_to_visual(self.task_dict[task][split][doc_id]) if split is not None else doc_to_visual(self.task_dict[task][doc_id])
+
+        visual_indices = []
+        imgs = []
+
+        has_index = (
+            isinstance(visual_list, (list, tuple)) and
+            len(visual_list) == 2 and
+            all(isinstance(img, Image.Image) for img in visual_list[0]) and
+            all(isinstance(i, int) for i in visual_list[1])
+        )
+
+        if has_index:
+            imgs.extend(visual_list[0])
+            visual_indices.extend(visual_list[1])
+        else:
             for visual in visual_list:
-                if has_index:
-                    img, idx = visual
-                    imgs.extend(img)
-                    visual_indices.extend(idx)
-                else:
-                    if isinstance(visual, Image.Image):
-                        img = self.encode_image(visual)
-                        imgs.append(img)
-                    elif isinstance(visual, str) and (".mp4" in visual or ".avi" in visual):
-                        frames = self.encode_video(visual, self.max_frames_num)
-                        imgs.extend(frames)
-            
-            payload = {
-                "model": self.model_name_or_path,
-                "messages": []
-            }
-            if self.system_prompt:
-                payload["messages"].append({
-                    "role": "system", 
-                    "content": {"type": "text", "text": self.system_prompt}
-                })
+                if isinstance(visual, Image.Image):
+                    img = await asyncio.to_thread(self.encode_image, visual)
+                    imgs.append(img)
+                elif isinstance(visual, str) and (".mp4" in visual or ".avi" in visual):
+                    frames = await asyncio.to_thread(self.encode_video, visual, self.max_frames_num)
+                    imgs.extend(frames)
 
-            content = self.build_message_content(
-                question=contexts,
-                pil_images=imgs,
-                visual_indices=visual_indices
-            )
-
+        payload = {
+            "model": self.model_name_or_path,
+            "messages": []
+        }
+        if self.system_prompt:
             payload["messages"].append({
-                "role": "user",
-                "content": content
+                "role": "system", 
+                "content": {"type": "text", "text": self.system_prompt}
             })
 
-            max_new_tokens = gen_kwargs.get("max_new_tokens", self.max_new_tokens)
-            do_sample = gen_kwargs.get("do_sample", self.do_sample)
-            temperature = gen_kwargs.get("temperature", self.temperature)
-            top_p = gen_kwargs.get("top_p", self.top_p)
-            num_beams = gen_kwargs.get("num_beams", self.num_beams)
-            payload["max_tokens"] = max_new_tokens
-            payload["temperature"] = temperature
+        content = self.build_message_content(
+            question=contexts,
+            pil_images=imgs,
+            visual_indices=visual_indices
+        )
 
-            if "o1" in self.model_name_or_path or "o3" in self.model_name_or_path:
-                del payload["temperature"]
-                payload["reasoning_effort"] = "medium"
-                payload["response_format"] = {"type": "text"}
-                payload.pop("max_tokens")
-                payload["max_completion_tokens"] = 4096
-            
-            for attempt in range(self.max_retries):
-                try:
-                    response = self.client.chat.completions.create(**payload)
-                    response_text = response.choices[0].message.content
-                    break
-                except Exception as e:
-                    error_msg = str(e)
-                    eval_logger.info(f"Attempt {attempt + 1}/{self.max_retries} failed with error: {error_msg}")
+        payload["messages"].append({
+            "role": "user",
+            "content": content
+        })
 
-                    # On last attempt, log error and set empty response
-                    if attempt == self.max_retries - 1:
-                        eval_logger.error(f"All {self.max_retries} attempts failed. Last error: {error_msg}")
-                        response_text = ""
-                    else:
-                        time.sleep(self.timeout)
-            res.append(response_text)
-            progress_bar.update(1)
+        max_new_tokens = gen_kwargs.get("max_new_tokens", self.max_new_tokens)
+        do_sample = gen_kwargs.get("do_sample", self.do_sample)
+        temperature = gen_kwargs.get("temperature", self.temperature)
+        top_p = gen_kwargs.get("top_p", self.top_p)
+        num_beams = gen_kwargs.get("num_beams", self.num_beams)
+        payload["max_tokens"] = max_new_tokens
+        payload["temperature"] = temperature
 
-        # Reorder results to match original order
-        progress_bar.close()
-        return res
+        if "o1" in self.model_name_or_path or "o3" in self.model_name_or_path:
+            del payload["temperature"]
+            payload["reasoning_effort"] = "medium"
+            payload["response_format"] = {"type": "text"}
+            payload.pop("max_tokens")
+            payload["max_completion_tokens"] = 4096
+        
+        for attempt in range(self.max_retries):
+            try:
+                async with self.sema:
+                    response = await self.async_client.chat.completions.create(**payload)
+                response_text = response.choices[0].message.content
+                break
+            except Exception as e:
+                error_msg = str(e)
+                eval_logger.info(f"Attempt {attempt + 1}/{self.max_retries} failed with error: {error_msg}")
+
+                # On last attempt, log error and set empty response
+                if attempt == self.max_retries - 1:
+                    response_text = ""
+                    eval_logger.error(f"All {self.max_retries} attempts failed. Last error: {error_msg}")
+                else:
+                    await asyncio.sleep(0.5)
+        return response_text
 
 
     def encode_image(self, image: Union[Image.Image, str]):
