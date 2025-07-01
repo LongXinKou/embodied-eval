@@ -80,23 +80,23 @@ class OpenAICompatible(BaseAPIModel):
             visual_indices = []
             imgs = []  # multiple images or frames for video
 
-            # ([PIL.Image,..], [index,...]), [PIL.Image, PIL.Image, ..]
-            if isinstance(visual_list, dict) and isinstance(visual_list[0][0], Image.Image) and isinstance(visual_list[1][0], int):
-                has_index = True
+            has_index = (
+                isinstance(visual_list, (list, tuple)) and
+                len(visual_list) == 2 and
+                all(isinstance(img, Image.Image) for img in visual_list[0]) and
+                all(isinstance(i, int) for i in visual_list[1])
+            )
+
+            if has_index:
+                imgs.extend(visual_list[0])
+                visual_indices.extend(visual_list[1])
             else:
-                has_index = False
-            
-            for visual in visual_list:
-                if has_index:
-                    img, idx = visual
-                    imgs.extend(img)
-                    visual_indices.extend(idx)
-                else:
+                for visual in visual_list:
                     if isinstance(visual, Image.Image):
-                        img = self.encode_image(visual)
+                        img = self.encode_image, visual
                         imgs.append(img)
                     elif isinstance(visual, str) and (".mp4" in visual or ".avi" in visual):
-                        frames = self.encode_video(visual, self.max_frames_num)
+                        frames = self.encode_video, visual, self.max_frames_num
                         imgs.extend(frames)
             
             payload = {
@@ -128,12 +128,15 @@ class OpenAICompatible(BaseAPIModel):
             payload["max_tokens"] = max_new_tokens
             payload["temperature"] = temperature
 
-            if "o1" in self.model_name_or_path or "o3" in self.model_name_or_path:
+            if "2.5-pro" in self.model_name_or_path:
+                payload["max_tokens"] = self.max_new_tokens
+
+            if "o1" in self.model_name_or_path or "o3" in self.model_name_or_path or "o4" in self.model_name_or_path:
                 del payload["temperature"]
                 payload["reasoning_effort"] = "medium"
                 payload["response_format"] = {"type": "text"}
                 payload.pop("max_tokens")
-                payload["max_completion_tokens"] = 4096
+                payload["max_completion_tokens"] = self.max_new_tokens
             
             for attempt in range(self.max_retries):
                 try:

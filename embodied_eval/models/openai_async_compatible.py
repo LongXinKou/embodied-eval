@@ -23,7 +23,7 @@ class OpenAIAsyncCompatible(BaseAPIModel):
             self,
             model_name_or_path: str = "gpt-4o",
             batch_size: Optional[Union[int, str]] = 1,
-            max_new_tokens: int = 2048,
+            max_new_tokens: int = 4096,
             temperature: float = 0,
             do_sample: bool = False,
             top_p: Optional[float] = None,
@@ -31,7 +31,7 @@ class OpenAIAsyncCompatible(BaseAPIModel):
             system_prompt: Optional[str] = None,
             max_frames_num: int = 16,
             timeout: int = 10,
-            max_retries: int = 5,
+            max_retries: int = 1,
             max_size_in_mb: int = 20,
             **kwargs,
     ) -> None:
@@ -64,15 +64,18 @@ class OpenAIAsyncCompatible(BaseAPIModel):
 
         async def _batch_async():
             tasks = []
-            for reg in requests:
+            for i, reg in enumerate(requests):
                 contexts, gen_kwargs, doc_to_visual, doc_id, task, split = reg.args
-                tasks.append(self._answer_async(contexts, gen_kwargs, doc_to_visual, doc_id, task, split))
+                # 把 index 传入 task 中
+                coro = self._answer_async(contexts, gen_kwargs, doc_to_visual, doc_id, task, split)
+                tasks.append((i, asyncio.create_task(coro)))
 
-            results = []
-            for fut in asyncio.as_completed(tasks):
+            results = [None] * len(tasks)
+            for i, fut in tasks:
                 result = await fut
-                results.append(result)
+                results[i] = result
                 progress_bar.update(1)
+
             return results
 
         results = list(asyncio.run(_batch_async()))
@@ -91,6 +94,7 @@ class OpenAIAsyncCompatible(BaseAPIModel):
             all(isinstance(img, Image.Image) for img in visual_list[0]) and
             all(isinstance(i, int) for i in visual_list[1])
         )
+        # has_index = False
 
         if has_index:
             imgs.extend(visual_list[0])
@@ -133,12 +137,16 @@ class OpenAIAsyncCompatible(BaseAPIModel):
         payload["max_tokens"] = max_new_tokens
         payload["temperature"] = temperature
 
-        if "o1" in self.model_name_or_path or "o3" in self.model_name_or_path:
+        if "2.5-pro" in self.model_name_or_path:
+            payload["max_tokens"] = self.max_new_tokens
+
+        if "o1" in self.model_name_or_path or "o3" in self.model_name_or_path or "o4" in self.model_name_or_path:
             del payload["temperature"]
             payload["reasoning_effort"] = "medium"
             payload["response_format"] = {"type": "text"}
             payload.pop("max_tokens")
-            payload["max_completion_tokens"] = 4096
+            payload["max_completion_tokens"] = self.max_new_tokens
+        
         
         for attempt in range(self.max_retries):
             try:
