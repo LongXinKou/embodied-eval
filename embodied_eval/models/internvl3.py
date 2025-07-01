@@ -265,7 +265,7 @@ class InternVL3(BaseAPIModel):
         res = []
 
         def _no_sort(x):
-            return 0, x[0]  # 所有 key 都一样，相当于不排序
+            return 0, x[0]  
 
         collator = Collator([req.args for req in requests], _no_sort, grouping=True)
         batches = collator.get_batched(n=self.batch_size, batch_fn=None)
@@ -323,14 +323,18 @@ class InternVL3(BaseAPIModel):
                     if len(visual) == 1: # single image
                         image_token = "<image>"
                         formatted_question = image_token + "\n" + context
-                        response, history = self.model.chat(
-                            self.tokenizer, 
-                            pixel_values, 
-                            formatted_question, 
-                            gen_kwargs, 
-                            history=None, 
-                            return_history=True
-                        )
+                        try:
+                            with torch.inference_mode():
+                                response, history = self.model.chat(
+                                    self.tokenizer, 
+                                    pixel_values, 
+                                    formatted_question, 
+                                    gen_kwargs, 
+                                    history=None, 
+                                    return_history=True
+                                )
+                        except Exception as e:
+                            eval_logger.info(f"Error {e} on request {batch_doc_id}")
                     else: 
                         # combined multi images
                         # image_token = "<image>"
@@ -347,6 +351,28 @@ class InternVL3(BaseAPIModel):
                         num_patches_list = [pixel_value.size(0) for pixel_value in pixel_values_list]
                         image_token = "".join([f"Image-{i+1}: <image>\n" for i in range(len(num_patches_list))]) 
                         formatted_question = image_token + "\n" + context
+                        try:
+                            with torch.inference_mode():
+                                response, history = self.model.chat(
+                                    self.tokenizer, 
+                                    pixel_values, 
+                                    formatted_question, 
+                                    gen_kwargs, 
+                                    num_patches_list=num_patches_list, 
+                                    history=None, 
+                                    return_history=True
+                                )
+                        except Exception as e:
+                            eval_logger.info(f"Error {e} on request {batch_doc_id}")
+
+                elif isinstance(visual[0], str):
+                    video_path = visual[0]
+                    pixel_values, num_patches_list = load_video(video_path, num_segments=self.num_frame)
+                    pixel_values = pixel_values.to(torch.bfloat16).cuda()
+                    # Frame1: <image>\nFrame2: <image>\n...\nFrame8: <image>\n{question}
+                    video_prefix = "".join([f"Frame{i+1}: <image>\n" for i in range(len(num_patches_list))])
+                    formatted_question = video_prefix + context
+                    try:
                         with torch.inference_mode():
                             response, history = self.model.chat(
                                 self.tokenizer, 
@@ -357,24 +383,8 @@ class InternVL3(BaseAPIModel):
                                 history=None, 
                                 return_history=True
                             )
-
-                elif isinstance(visual[0], str):
-                    video_path = visual[0]
-                    pixel_values, num_patches_list = load_video(video_path, num_segments=self.num_frame)
-                    pixel_values = pixel_values.to(torch.bfloat16).cuda()
-                    # Frame1: <image>\nFrame2: <image>\n...\nFrame8: <image>\n{question}
-                    video_prefix = "".join([f"Frame{i+1}: <image>\n" for i in range(len(num_patches_list))])
-                    formatted_question = video_prefix + context
-                    with torch.inference_mode():
-                        response, history = self.model.chat(
-                            self.tokenizer, 
-                            pixel_values, 
-                            formatted_question, 
-                            gen_kwargs, 
-                            num_patches_list=num_patches_list, 
-                            history=None, 
-                            return_history=True
-                        )
+                    except Exception as e:
+                        eval_logger.info(f"Error {e} on request {batch_doc_id}")
                 res.append(response)
                 progress_bar.update(1)
                 torch.cuda.empty_cache()
