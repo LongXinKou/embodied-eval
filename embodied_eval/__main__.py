@@ -7,13 +7,12 @@ from accelerate import Accelerator
 from accelerate.utils import InitProcessGroupKwargs
 from loguru import logger as eval_logger
 
-from embodied_eval.inference import SimpleInference
-from embodied_eval.evaluate import SimpleEvaluate, SaveResult
 from embodied_eval.tasks import TaskManager
 from embodied_eval.models import get_model
 from embodied_eval.utils import (
     get_datetime_str
 )
+from embodied_eval.evaluators import EQAEvaluator
 
 def parse_args():
     """
@@ -41,6 +40,11 @@ def parse_args():
         '--batch_size',
         type=int,
         default=1
+    )
+    parser.add_argument(
+        "--save_results",
+        default=True,
+        type=bool,
     )
     parser.add_argument(
         "--output_path",
@@ -72,115 +76,19 @@ def cli_evaluate(args):
     eval_logger.info(f"Verbosity set to {args.verbosity}")
     os.environ["VERBOSITY"] = args.verbosity
 
-    # initialize Accelerator
-    kwargs_handler = InitProcessGroupKwargs(timeout=datetime.timedelta(seconds=60000))
-    accelerator = Accelerator(kwargs_handlers=[kwargs_handler])
+    # initialize Evaluator
+    evaluator = EQAEvaluator(args)
 
     try:
-        datetime_str = get_datetime_str(timezone=args.timezone)
-
-        results_dict = cli_evaluate_single(args)
-
-        if results_dict:
-            # Visualize
-            print_results(results_dict, args)
-
-            # Save
-            SaveResult(
-                results_dict=results_dict,
-                output_path=args.output_path,
-                datetime_str=datetime_str
-            )
+        eval_tasks = evaluator.inference()
+        results_dict = evaluator.evaluate(eval_tasks)
+        evaluator.print_results(results_dict)
+        if args.save_results:
+            evaluator.save_results(results_dict)
 
     except Exception as e:
         eval_logger.error(
             f"Error during evaluation: {e}. Please set `--verbosity=DEBUG` to get more information.")
-
-def cli_evaluate_single(args):
-    task_manager = TaskManager()
-
-    task_list = args.tasks.split(",")
-    task_names = task_manager.match_tasks(task_list)
-    eval_logger.info(f"Selected Tasks: {task_names}")
-
-    # Model
-    if isinstance(args.model, str):
-        if args.model_args is None:
-            model_args = ""
-
-        model = get_model(model_name=args.model).create_from_arg_string(
-            args.model_args,
-            additional_config = {
-                "batch_size": args.batch_size,
-            }
-        )
-
-    # Inference
-    eval_tasks = SimpleInference(
-        model=model,
-        tasks=task_list,
-        task_manager=task_manager,
-        limit=args.limit,
-        seed=args.seed,
-    )
-
-    # Evaluate
-    results_dict = SimpleEvaluate(
-        model=model,
-        eval_tasks=eval_tasks,
-    )
-
-    return results_dict
-
-def print_results(results_dict, args):
-    results = results_dict["results"]
-    configs = results_dict["configs"]
-    for task_name, _ in results.items():
-        result, config = results[task_name], configs[task_name]
-        info = f"task:{config['task']}, data:{config['dataset_path']}/{config.get('dataset_kwargs')},\
-            generate:{config['generation_kwargs']}"
-        eval_logger.info(info)
-        make_table(result, args)
-    
-def make_table(result, args):
-    from pytablewriter import MarkdownTableWriter
-    import re
-
-    model = args.model
-
-    type_to_metrics = {}
-    for key, val in result.items():
-        if key == "overall" or key.endswith("_stderr") or key.endswith("_average"):
-            continue
-        qtype, metric_name = key.rsplit("_", 1)
-        if qtype not in type_to_metrics:
-            type_to_metrics[qtype] = {}
-        type_to_metrics[qtype][metric_name] = val
-        
-    all_metrics = sorted({m for v in type_to_metrics.values() for m in v})
-    headers = ["Metric"] + list(type_to_metrics.keys()) + ["Average"] 
-    value_matrix = []
-
-    for metric in all_metrics:
-        row = [metric]
-        for qtype in type_to_metrics:
-            val = type_to_metrics[qtype].get(metric, "")
-            row.append(f"{val:.4f}" if val != "" else "")
-        avg_key = f"{metric}_average"
-        avg_val = result.get(avg_key, "")
-        row.append(f"{avg_val:.4f}" if avg_val != "" else "")
-        value_matrix.append(row)
-
-    # Add the metric averages to the original result dictionary
-    md_writer = MarkdownTableWriter()
-    md_writer.table_name = f"Results for {model}"
-    md_writer.headers = headers
-    md_writer.value_matrix = value_matrix
-
-    eval_logger.info("Markdown Table:\n")
-    eval_logger.info(f"Overall: {result['overall']}")
-    md_writer.write_table()
-
 
 if __name__ == "__main__":
     args = parse_args()

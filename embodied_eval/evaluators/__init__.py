@@ -1,0 +1,1 @@
+from embodied_eval.evaluators.eqa_evaluator import EQAEvaluator
