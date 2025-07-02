@@ -1,0 +1,3 @@
+env: "EBNavEnv"
+# Environment configuration for EBNavEnv
+# Add any environment-specific parameters here

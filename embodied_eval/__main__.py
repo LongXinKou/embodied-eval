@@ -12,7 +12,7 @@ from embodied_eval.models import get_model
 from embodied_eval.utils import (
     get_datetime_str
 )
-from embodied_eval.evaluators import EQAEvaluator
+from embodied_eval.evaluators import build_evaluator
 
 def parse_args():
     """
@@ -28,7 +28,17 @@ def parse_args():
         help="model_name_or_path=,lora_id=",
     )
     parser.add_argument(
+        "--evaluator",
+        type=str,
+        default="EQAEvaluator",
+        help="Choose Evaluator: EQAEvaluator or NavEvaluator. "
+    )
+    parser.add_argument(
         "--tasks",
+        default=None,
+    )
+    parser.add_argument(
+        "--env",
         default=None,
     )
     parser.add_argument(
@@ -40,6 +50,23 @@ def parse_args():
         '--batch_size',
         type=int,
         default=1
+    )
+    parser.add_argument(
+        "--env",
+        type=str,
+        default=None,
+        help="Environment name for navigation tasks"
+    )
+    parser.add_argument(
+        "--env_args",
+        default="",
+        help="Environment arguments, e.g., config_path=,data_path=",
+    )
+    parser.add_argument(
+        "--evaluator",
+        type=str,
+        default="eqa",
+        help="Evaluator type: eqa or nav"
     )
     parser.add_argument(
         "--save_results",
@@ -77,18 +104,18 @@ def cli_evaluate(args):
     os.environ["VERBOSITY"] = args.verbosity
 
     # initialize Evaluator
-    evaluator = EQAEvaluator(args)
+    evaluator = build_evaluator(args)
 
     try:
-        eval_tasks = evaluator.inference()
-        results_dict = evaluator.evaluate(eval_tasks)
+        inference_results = evaluator.inference()
+        results_dict = evaluator.evaluate(inference_results)
         evaluator.print_results(results_dict)
         if args.save_results:
             evaluator.save_results(results_dict)
 
     except Exception as e:
         eval_logger.error(
-            f"Error during evaluation: {e}. Please set `--verbosity=DEBUG` to get more information.")
+            f"Error during evaluation: {e}.")
 
 if __name__ == "__main__":
     args = parse_args()

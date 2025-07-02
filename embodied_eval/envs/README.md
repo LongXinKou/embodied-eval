@@ -1,0 +1,7 @@
+
+## 🔨 Setup
+
+### embodiedbench
+```
+ds
+```

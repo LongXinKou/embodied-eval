@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from embodied_eval.tasks import TaskManager, get_task_dict, get_task_list
 from embodied_eval.models import get_model
-from embodied_eval.utils import positional_deprecated, create_iterator, get_datetime_str
+from embodied_eval.utils import create_iterator, get_datetime_str
 
 
 class EQAEvaluator:
