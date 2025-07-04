@@ -17,6 +17,12 @@ cd LLaVA-NeXT
 pip install -e . --no-deps # llava 1.7.0.dev0 
 ```
 
+### Qwen2.5-VL
+```
+pip install qwen-vl-utils
+pip install transformers==4.49.0
+```
+
 ### VILA
 need to install `llava` from VILA repo instead of LLaVA or LLaVA-Next.
 ```
