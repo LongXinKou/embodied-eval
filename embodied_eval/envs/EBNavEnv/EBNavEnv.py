@@ -88,7 +88,8 @@ class EBNavigationEnv(gym.Env):
         boundingbox = False, 
         multistep = False,  
         resolution = 500, 
-        selected_indexes =[]
+        selected_indexes =[],
+        **kwargs,
     ):
         """
         A wrapper for AI2-THOR ManipulaTHOR environment.
@@ -139,9 +140,14 @@ class EBNavigationEnv(gym.Env):
         self.language_skill_set = DISCRETE_SKILLSET
         self.action_space = gym.spaces.Discrete(len(self.language_skill_set))
 
+        # set observation space
+        self.obs_key = kwargs.get('obs_key', 'head_rgb')
+
         # set log and verbosity(0 for concise)
         self.feedback_verbosity = 0
         self.log_path = 'running/eb_nav/{}'.format(exp_name)
+
+        self.system_prompt = kwargs.get('system_prompt', "")
 
         self.multiview = multiview
         self.boundingbox = boundingbox
