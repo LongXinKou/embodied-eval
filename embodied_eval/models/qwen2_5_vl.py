@@ -45,7 +45,6 @@ class Qwen2_5_VL(BaseAPIModel):
             min_pixels: int = 3126,
             max_pixels: int = 256*28*28,
             interleave_visuals: Optional[bool] = False,
-            reasoning_prompt: Optional[str] = None,
             **kwargs,
     ) -> None:
         super().__init__()
@@ -97,11 +96,10 @@ class Qwen2_5_VL(BaseAPIModel):
         self.max_pixels = max_pixels
         self.min_pixels = min_pixels
         self.max_num_frames = max_num_frames
-        if reasoning_prompt:
-            self.reasoning_prompt = reasoning_prompt.replace("\\n", "\n")
-        else:
-            self.reasoning_prompt = None
         self.interleave_visuals = interleave_visuals
+
+        # Navagation-related attributes
+        self.obs_key = kwargs.get("obs_key", None)  # Default observation key
 
         # Set up distributed evaluation
         if accelerator.num_processes > 1:
@@ -138,23 +136,10 @@ class Qwen2_5_VL(BaseAPIModel):
             return self.accelerator.unwrap_model(self._model)
         else:
             return self._model
-    
-    @property
-    def eot_token_id(self):
-        # we use EOT because end of *text* is more accurate for what we're doing than end of *sentence*
-        return self.tokenizer.eos_token_id
-    
-    @property
-    def pad_token_id(self):
-        return self.tokenizer.pad_token_id
 
     @property
     def max_length(self):
         return self._max_length
-    
-    @property
-    def batch_size(self):
-        return self.batch_size_per_gpu
 
     @property
     def device(self):
@@ -167,166 +152,172 @@ class Qwen2_5_VL(BaseAPIModel):
     @property
     def world_size(self):
         return self._world_size
-    
-    def generate_until(self, requests) -> List[str]:
-        """Generate text until a stopping sequence."""
-        res = []
 
-        def _sort_by_context_length(x):
-            # Sort by context length for better batching
-            toks = self.tokenizer.encode(x[0])
-            return -len(toks), x[0]
+    def process_visuals(self, visual):
+        """Process visuals for the model."""
+        if isinstance(visual, str) and visual.endswith((".mp4", ".avi", ".mov")):
+            # Video file
+            vr = decord.VideoReader(visual)
+            first_frame = vr[0].asnumpy()
+            height, width = first_frame.shape[:2]
+            processed_visual = {
+                "type": "video", 
+                "video": visual, 
+                "max_pixels": self.max_pixels, 
+                "min_pixels": self.min_pixels
+            }
+        elif isinstance(visual, Image.Image):
+            # Handle both single and multiple images
+            base64_image = visual.convert("RGB")
+            buffer = BytesIO()
+            base64_image.save(buffer, format="JPEG")
+            base64_bytes = base64.b64encode(buffer.getvalue())
+            base64_string = base64_bytes.decode("utf-8")
+            processed_visual = {
+                "type": "image", 
+                "image": f"data:image/jpeg;base64,{base64_string}", 
+                "max_pixels": self.max_pixels, 
+                "min_pixels": self.min_pixels
+            }
+        return processed_visual
+
+    def build_messages(self, context: str, visuals: List[dict]) -> List[dict]:
+        """Build messages for the model."""
+        message = [{"role": "system", "content": self.system_prompt}] if self.system_prompt else []
         
-        # Initialize the Collator to group requests and sort them by context length
-        collator = Collator([req.args for req in requests], _sort_by_context_length, grouping=True)
-        # Create batches from the sorted and grouped requests
-        batches = collator.get_batched(n=self.batch_size, batch_fn=None)
-
-        # Determine the number of iterations required to process all requests
-        num_iters = len(requests) // self.batch_size if len(requests) % self.batch_size == 0 else len(requests) // self.batch_size + 1
-        progress_bar = tqdm(total=num_iters, disable=(self.rank != 0), desc="Qwem2-VL Responding")
-
-        for batch in batches:
-            batch_contexts, all_gen_kwargs, batch_doc_to_visual, batch_doc_id, batch_task, batch_split = zip(*batch)
-            task = batch_task[0]
-            split = batch_split[0]
-            gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
-
-            until = [self.tokenizer.decode(self.eot_token_id)]
-            if "until" in gen_kwargs:
-                gen_kwargs.pop("until")
-                if isinstance(until, str):
-                    until = [until]
-                
-            # Get generation parameters
-            if "max_new_tokens" not in gen_kwargs:
-                gen_kwargs["max_new_tokens"] = self.max_new_tokens
-            if "do_sample" not in gen_kwargs:
-                gen_kwargs["do_sample"] = self.do_sample
-            if "temperature" not in gen_kwargs:
-                gen_kwargs["temperature"] = self.temperature
-            if "top_p" not in gen_kwargs:
-                gen_kwargs["top_p"] = self.top_p
-            if "num_beams" not in gen_kwargs:
-                gen_kwargs["num_beams"] = self.num_beams
-            if "use_cache" not in gen_kwargs:
-                gen_kwargs["use_cache"] = self.use_cache
-
-            batch_visuals = []
-            for ids in batch_doc_id:
-                doc_to_visual = batch_doc_to_visual[0]
-                if split is not None:
-                    visuals = doc_to_visual(self.task_dict[task][split][ids])
-                    if isinstance(visuals, tuple): # ([visual], [visual_index])
-                        batch_visuals.append(visuals[0])
-                    else:
-                        batch_visuals.append(visuals) # [visual]
-                else:
-                    visuals = doc_to_visual(self.task_dict[task][ids])
-                    if isinstance(visuals, dict):
-                        batch_visuals.append(visuals[0])
-                    else:
-                        batch_visuals.append(visuals)
-            
-            batched_messages = []
-            for visual_list, context in zip(batch_visuals, batch_contexts): 
-                if "<image>" in context:
-                    context = context.replace("<image>", "")
-                
-                message = [{"role": "system", "content": self.system_prompt}]
-                if self.reasoning_prompt:
-                    context = context.strip() + self.reasoning_prompt
-                
-                processed_visuals = []
-                for visual in visual_list:
-                    if isinstance(visual, str) and visual.endswith((".mp4", ".avi", ".mov")):  # Video file
-                        vr = decord.VideoReader(visual)
-                        first_frame = vr[0].asnumpy()
-                        height, width = first_frame.shape[:2]
-                        # max_pixels = height * width
-                        processed_visuals.append({
-                            "type": "video", 
-                            "video": visual, 
-                            "max_pixels": self.max_pixels, 
-                            "min_pixels": self.min_pixels
-                        })
-                    elif isinstance(visual, Image.Image):  # Handle both single and multiple images
-                        base64_image = visual.convert("RGB")
-                        buffer = BytesIO()
-                        base64_image.save(buffer, format="JPEG")
-                        base64_bytes = base64.b64encode(buffer.getvalue())
-                        base64_string = base64_bytes.decode("utf-8")
-                        processed_visuals.append({
-                            "type": "image", 
-                            "image": f"data:image/jpeg;base64,{base64_string}", 
-                            "max_pixels": self.max_pixels, 
-                            "min_pixels": self.min_pixels
-                        })
-                if self.interleave_visuals is False:
-                    message.append(
-                        {
-                            "role": "user",
-                            "content": processed_visuals + [{"type": "text", "text": context}],
-                        }
-                    )
-                else:  # currently support find <image x> in the context
-                    image_placeholders = re.findall(r"<image \d+>", context)
-                    content_parts = []
-                    text_parts = re.split(r"<image \d+>", context)
-                    if text_parts[0]:
-                        content_parts.append({"type": "text", "text": text_parts[0]})
-
-                    for i, placeholder in enumerate(image_placeholders):
-                        img_idx = int(re.search(r"<image (\d+)>", placeholder).group(1)) - 1
-                        image_idx = min(img_idx, len(processed_visuals) - 1) if processed_visuals else 0
-                        if processed_visuals and image_idx < len(processed_visuals):
-                            content_parts.append(processed_visuals[image_idx])
-                        if i + 1 < len(text_parts) and text_parts[i + 1]:
-                            content_parts.append({"type": "text", "text": text_parts[i + 1]})
-
-                    message.append(
-                        {
-                            "role": "user",
-                            "content": content_parts,
-                        }
-                    )
-
-                batched_messages.append(message)
-            
-            texts = [self.processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True) for msg in batched_messages]
-            image_inputs, video_inputs = process_vision_info(batched_messages)
-            if video_inputs is not None:
-                total_frames = video_inputs[0].shape[0]
-                indices = np.linspace(0, total_frames - 1, self.max_num_frames, dtype=int)
-                # Append the last frame index if not already included
-                if total_frames - 1 not in indices:
-                    indices = np.append(indices, total_frames - 1)
-                video_inputs[0] = video_inputs[0][indices]
-            inputs = self.processor(
-                text=texts, 
-                images=image_inputs, 
-                videos=video_inputs, 
-                padding=True, 
-                return_tensors="pt"
-            ).to(self.device)
-
-            cont = self.model.generate(
-                **inputs,
-                **gen_kwargs
+        if self.interleave_visuals is False:
+            message.append(
+                {
+                    "role": "user",
+                    "content": visuals + [{"type": "text", "text": context}],
+                }
             )
-            generated_ids_trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, cont)]
-            text_outputs = self.processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)
-            for i, ans in enumerate(text_outputs):
-                for term in until:
-                    if len(term) > 0:
-                        ans = ans.split(term)[0]
-                text_outputs[i] = ans
+        else: # Currently support find <image x> in the context
+            image_placeholders = re.findall(r"<image \d+>", context)
+            content_parts = []
+            text_parts = re.split(r"<image \d+>", context)
+            if text_parts[0]:
+                content_parts.append({"type": "text", "text": text_parts[0]})
 
-            text_outputs = [response.strip() for response in text_outputs]
-            res.extend(text_outputs)
-            progress_bar.update(1)
+            for i, placeholder in enumerate(image_placeholders):
+                img_idx = int(re.search(r"<image (\d+)>", placeholder).group(1)) - 1
+                image_idx = min(img_idx, len(visuals) - 1) if visuals else 0
+                if visuals and image_idx < len(visuals):
+                    content_parts.append(visuals[image_idx])
+                if i + 1 < len(text_parts) and text_parts[i + 1]:
+                    content_parts.append({"type": "text", "text": text_parts[i + 1]})
 
-        # Reorder results to match original order
-        res = collator.get_original(res)
-        progress_bar.close()
-        return res
+            message.append(
+                {
+                    "role": "user",
+                    "content": content_parts,
+                }
+            )
+        return message
+    
+    def respond(self, context, visuals, **gen_kwargs):
+        """
+        Generate a text response based on the given context and visual inputs.
+        Args:
+            context (str): The input text context for the response.
+            visuals (list): A list of visual inputs (e.g., images or videos) to process.
+            gen_kwargs (dict, optional): Additional keyword arguments for text generation.
+        Returns:
+            str: The generated text response.
+        """   
+        # Process the request
+        if "<image>" in context:
+            context = context.replace("<image>", "")
+
+        # Process visuals
+        processed_visuals = [self.process_visuals(visual) for visual in visuals]
+        
+        # Build the message
+        message = self.build_messages(context, processed_visuals)
+        
+        # Apply chat template and process vision info
+        text = self.processor.apply_chat_template(message, tokenize=False, add_generation_prompt=True)
+        image_inputs, video_inputs = process_vision_info([message])
+        
+        inputs = self.processor(
+            text=[text], 
+            images=image_inputs, 
+            videos=video_inputs, 
+            padding=True, 
+            return_tensors="pt"
+        ).to(self.device)
+
+        # Get generation parameters
+        if "max_new_tokens" not in gen_kwargs:
+            gen_kwargs["max_new_tokens"] = self.max_new_tokens
+        if "do_sample" not in gen_kwargs:
+            gen_kwargs["do_sample"] = self.do_sample
+        if "temperature" not in gen_kwargs:
+            gen_kwargs["temperature"] = self.temperature
+        if "top_p" not in gen_kwargs:
+            gen_kwargs["top_p"] = self.top_p
+        if "num_beams" not in gen_kwargs:
+            gen_kwargs["num_beams"] = self.num_beams
+        if "use_cache" not in gen_kwargs:
+            gen_kwargs["use_cache"] = self.use_cache
+
+        cont = self.model.generate(
+            **inputs,
+            **gen_kwargs
+        )
+        
+        generated_ids_trimmed = [out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, cont)]
+        text_output = self.processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+        
+        return text_output.strip()
+
+    def act(self, observation, prompt, **kwargs):
+        """Generate action and reasoning for navigation tasks"""
+        if isinstance(observation, dict):
+            if self.obs_key and self.obs_key in observation:
+                observation = observation[self.obs_key]
+            else:
+                eval_logger.warning(f"Observation does not contain key {self.obs_key}. Using full observation.")
+        else:
+            observation = observation
+
+        # Process visual input 
+        if isinstance(observation, Image.Image):
+            observation = observation
+        elif isinstance(observation, np.ndarray):
+            observation = Image.fromarray(observation)
+        visuals = [observation]
+        processed_visual = [self.process_visuals(visuals)]
+        
+        # Generate response
+        response = self.respond(prompt, processed_visual)
+
+        # TODO Try to parse the response to extract action and reasoning
+        try:
+            import json
+            parsed = json.loads(response)
+            if isinstance(parsed, dict):
+                action = parsed.get('action', response)
+                reasoning = parsed.get('reasoning', response)
+            else:
+                action = response
+                reasoning = response
+        except:
+            # If parsing fails, use the whole response as both action and reasoning
+            action = response
+            reasoning = response
+        
+        return action, reasoning
+
+    def reset(self):
+        """Reset model state for navigation tasks"""
+        self.episode_messages = []
+        self.episode_action_feedback = []
+        self.planner_steps = 0
+        self.output_json_error = 0
+    
+    def update_info(self, info):
+        self.episode_action_feedback.append([
+            info['action_id'],
+            info['env_feedback']
+        ])

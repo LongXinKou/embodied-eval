@@ -259,139 +259,93 @@ class InternVL3(BaseAPIModel):
     def world_size(self):
         return self._world_size
     
-    @torch.no_grad()
-    def generate_until(self, requests) -> List[str]:
-        """Generate text until a stopping sequence."""
-        res = []
+    def respond(self, context, visuals, **gen_kwargs):
+        """
+        Generate a text response based on the given context and visual inputs.
+        Args:
+            context (str): The input text context for the response.
+            visuals (list): A list of visual inputs (e.g., images or videos) to process.
+            gen_kwargs (dict, optional): Additional keyword arguments for text generation.
+        Returns:
+            str: The generated text response.
+        """   
+        # Set default generation parameters
+        gen_kwargs = dict(gen_kwargs) if gen_kwargs else {}
+        if "max_new_tokens" not in gen_kwargs:
+            gen_kwargs["max_new_tokens"] = self.max_new_tokens
+        if "do_sample" not in gen_kwargs:
+            gen_kwargs["do_sample"] = self.do_sample
+        if "temperature" not in gen_kwargs:
+            gen_kwargs["temperature"] = self.temperature
+        if "top_p" not in gen_kwargs:
+            gen_kwargs["top_p"] = self.top_p
+        if "num_beams" not in gen_kwargs:
+            gen_kwargs["num_beams"] = self.num_beams
+        if "use_cache" not in gen_kwargs:
+            gen_kwargs["use_cache"] = self.use_cache
 
-        def _no_sort(x):
-            return 0, x[0]  
+        # Filter out invalid generation parameters
+        pop_keys = []
+        for k, v in gen_kwargs.items():
+            if k not in DEFAULT_GEN_KWARGS:
+                pop_keys.append(k)
+        for k in pop_keys:
+            gen_kwargs.pop(k)
 
-        collator = Collator([req.args for req in requests], _no_sort, grouping=True)
-        batches = collator.get_batched(n=self.batch_size, batch_fn=None)
-        num_iters = len(requests) // self.batch_size if len(requests) % self.batch_size == 0 else len(requests) // self.batch_size + 1
-        progress_bar = tqdm(total=num_iters, disable=(self.rank != 0), desc="Model Responding")
-
-        for batch in batches:
-            batch_contexts, all_gen_kwargs, batch_doc_to_visual, batch_doc_id, batch_task, batch_split = zip(*batch)
-            task = batch_task[0]
-            split = batch_split[0]
-            gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
-
-            # Get generation parameters
-            if "max_new_tokens" not in gen_kwargs:
-                gen_kwargs["max_new_tokens"] = self.max_new_tokens
-            if "do_sample" not in gen_kwargs:
-                gen_kwargs["do_sample"] = self.do_sample
-            if "temperature" not in gen_kwargs:
-                gen_kwargs["temperature"] = self.temperature
-            if "top_p" not in gen_kwargs:
-                gen_kwargs["top_p"] = self.top_p
-            if "num_beams" not in gen_kwargs:
-                gen_kwargs["num_beams"] = self.num_beams
-            if "use_cache" not in gen_kwargs:
-                gen_kwargs["use_cache"] = self.use_cache
-
-            pop_keys = []
-            for k, v in gen_kwargs.items():
-                if k not in DEFAULT_GEN_KWARGS:
-                    pop_keys.append(k)
-
-            for k in pop_keys:
-                gen_kwargs.pop(k)
+        # Handle visual inputs
+        if isinstance(visuals[0], Image.Image):
+            # Process images
+            pixel_values_list = [load_image(img, max_num=self.max_num).to(torch.bfloat16).to(self.device) for img in visuals]
+            pixel_values = torch.cat(pixel_values_list, dim=0)
+            if len(visuals) == 1:
+                # Single image
+                num_patches_list = None
+                image_token = "<image>"
+                formatted_question = image_token + "\n" + context
+            else:
+                # Multiple images
+                # image_token = "<image>"
+                # formatted_question = image_token + "\n" + context
+                num_patches_list = [pixel_value.size(0) for pixel_value in pixel_values_list]
+                image_token = "".join([f"Image-{i+1}: <image>\n" for i in range(len(num_patches_list))]) 
+                formatted_question = image_token + "\n" + context
+        elif isinstance(visuals[0], str):
+            # Process video
+            video_path = visuals[0]
+            pixel_values, num_patches_list = load_video(video_path, num_segments=self.num_frame)
+            pixel_values = pixel_values.to(torch.bfloat16).to(self.device)
             
-            batch_visuals = []
-            for ids in batch_doc_id:
-                doc_to_visual = batch_doc_to_visual[0]
-                if split is not None:
-                    visuals = doc_to_visual(self.task_dict[task][split][ids])
-                    if isinstance(visuals, tuple): # ([visual], [visual_index])
-                        batch_visuals.append(visuals[0])
-                    else:
-                        batch_visuals.append(visuals) # [visual]
-                else:
-                    visuals = doc_to_visual(self.task_dict[task][ids])
-                    if isinstance(visuals, dict):
-                        batch_visuals.append(visuals[0])
-                    else:
-                        batch_visuals.append(visuals)
-            
-            for visual, context in zip(batch_visuals, batch_contexts): 
-                if isinstance(visual[0], Image.Image):
-                    pixel_values_list = [load_image(img, max_num=self.max_num).to(torch.bfloat16).to(self.device) for img in visual]
-                    pixel_values = torch.cat(pixel_values_list, dim=0)
-                    if len(visual) == 1: # single image
-                        image_token = "<image>"
-                        formatted_question = image_token + "\n" + context
-                        try:
-                            with torch.inference_mode():
-                                response, history = self.model.chat(
-                                    self.tokenizer, 
-                                    pixel_values, 
-                                    formatted_question, 
-                                    gen_kwargs, 
-                                    history=None, 
-                                    return_history=True
-                                )
-                        except Exception as e:
-                            eval_logger.info(f"Error {e} on request {batch_doc_id}")
-                    else: 
-                        # combined multi images
-                        # image_token = "<image>"
-                        # formatted_question = image_token + "\n" + context
-                        # response, history = self.model.chat(
-                        #     self.tokenizer, 
-                        #     pixel_values, 
-                        #     formatted_question, 
-                        #     gen_kwargs, 
-                        #     history=None, 
-                        #     return_history=True
-                        # )
-                        # separate multi images
-                        num_patches_list = [pixel_value.size(0) for pixel_value in pixel_values_list]
-                        image_token = "".join([f"Image-{i+1}: <image>\n" for i in range(len(num_patches_list))]) 
-                        formatted_question = image_token + "\n" + context
-                        try:
-                            with torch.inference_mode():
-                                response, history = self.model.chat(
-                                    self.tokenizer, 
-                                    pixel_values, 
-                                    formatted_question, 
-                                    gen_kwargs, 
-                                    num_patches_list=num_patches_list, 
-                                    history=None, 
-                                    return_history=True
-                                )
-                        except Exception as e:
-                            eval_logger.info(f"Error {e} on request {batch_doc_id}")
-
-                elif isinstance(visual[0], str):
-                    video_path = visual[0]
-                    pixel_values, num_patches_list = load_video(video_path, num_segments=self.num_frame)
-                    pixel_values = pixel_values.to(torch.bfloat16).cuda()
-                    # Frame1: <image>\nFrame2: <image>\n...\nFrame8: <image>\n{question}
-                    video_prefix = "".join([f"Frame{i+1}: <image>\n" for i in range(len(num_patches_list))])
-                    formatted_question = video_prefix + context
-                    try:
-                        with torch.inference_mode():
-                            response, history = self.model.chat(
-                                self.tokenizer, 
-                                pixel_values, 
-                                formatted_question, 
-                                gen_kwargs, 
-                                num_patches_list=num_patches_list, 
-                                history=None, 
-                                return_history=True
-                            )
-                    except Exception as e:
-                        eval_logger.info(f"Error {e} on request {batch_doc_id}")
-                res.append(response)
-                progress_bar.update(1)
-                torch.cuda.empty_cache()
+            # Create video frame tokens
+            video_prefix = "".join([f"Frame{i+1}: <image>\n" for i in range(len(num_patches_list))])
+            formatted_question = video_prefix + context
         
-        # Reorder results to match original order
-        res = collator.get_original(res)
-        progress_bar.close()
-        return res
+        try:
+            if num_patches_list is not None:
+                response, history = self.model.chat(
+                    self.tokenizer, 
+                    pixel_values, 
+                    formatted_question, 
+                    gen_kwargs, 
+                    num_patches_list=num_patches_list, 
+                    history=None, 
+                    return_history=True
+                )
+            else:
+                response, history = self.model.chat(
+                    self.tokenizer, 
+                    pixel_values, 
+                    formatted_question, 
+                    gen_kwargs, 
+                    history=None, 
+                    return_history=True
+                )
+            torch.cuda.empty_cache()
+        except Exception as e:
+            eval_logger.error(f"Error during inference: {e}")
+            response = "Error processing input."
+        return response
+
+    def act(self, observation, instruction, **kwargs):
+        return super().act(observation, instruction, **kwargs)
 
 

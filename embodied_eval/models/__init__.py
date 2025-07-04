@@ -32,25 +32,6 @@ class BaseAPIModel(abc.ABC):
         self._world_size = 1
         self.task_dict = {}
 
-    @abc.abstractmethod
-    def generate_until(self, requests) -> List[str]:
-        """Generate greedily until a stopping sequence
-
-        :param requests: list[Instance]
-            A list of Instance objects with property `args` which returns a tuple (context, until).
-            context: str
-                Context string
-            generation_kwargs: dict
-                Generation Kwargs
-            'visual_list: list[dict]'
-                Visual input to the model. Can be None.
-        :return: list[str]
-            A list of strings continuation
-            continuation: str
-                The generated continuation.
-        """
-        pass
-
     @property
     def rank(self):
         # used in the case of parallelism. Hardcoded to
@@ -64,6 +45,21 @@ class BaseAPIModel(abc.ABC):
         # ensure no errors arise using API models which do
         # not support multi-device parallelism nor expect it.
         return self._world_size
+    
+    @abc.abstractmethod
+    def respond(self, context: str, visuals: Union[List[str], List[Tuple[str, int]]], **gen_kwargs) -> str:
+        """
+        Generate a response based on the context and visuals.
+
+        Parameters:
+        - context: The input text context.
+        - visuals: List of visual inputs, either as file paths or tuples of (file_path, index).
+        - gen_kwargs: Additional generation parameters.
+
+        Returns:
+        - Generated response string.
+        """
+        raise NotImplementedError("This method should be implemented by subclasses.")
 
     @classmethod
     def create_from_arg_string(cls: Type[T], arg_string: str, additional_config: Optional[dict] = None) -> T:
@@ -81,7 +77,7 @@ class BaseAPIModel(abc.ABC):
         args = simple_parse_args_string(arg_string)
         args2 = {k: v for k, v in additional_config.items() if v is not None}
         return cls(**args, **args2)
-
+    
 
 def get_model(model_name):
     """
