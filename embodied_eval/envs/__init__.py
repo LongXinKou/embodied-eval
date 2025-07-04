@@ -79,7 +79,7 @@ def get_env(env_name):
 
     env_class_name = AVAILABLE_ENVS[env_name]
     if "." not in env_class_name:
-        env_class_path = f"embodied_eval.envs.{env_name}.{env_class_name}"
+        env_class_path = f"embodied_eval.envs.{env_name}.{env_name}.{env_class_name}"
     else:
         env_class_path = env_class_name
 
