@@ -36,8 +36,7 @@ class EQAEvaluator:
         eval_logger.info(f"Selected Tasks: {self.task_names}")
         self.task_dict = get_task_dict(self.task_list, self.task_manager)
 
-        for task_name, task_obj in self.task_dict.items():
-            self.model.task_dict[task_name] = task_obj.dataset
+        # Set task_dict for model
         for task_name, task_obj in self.task_dict.items():
             self.model.task_dict[task_name] = task_obj.dataset
 
@@ -92,8 +91,7 @@ class EQAEvaluator:
                 for _ in range(padding_requests[reqtype]):
                     cloned_reqs.extend([req] * req.repeats)
 
-            # Run requests
-            resps = getattr(self.model, reqtype)(cloned_reqs)
+            resps = self.single_inference(cloned_reqs)
 
             # put responses from model into a list of length K for each request.
             for x, req in zip(resps, cloned_reqs):
@@ -103,6 +101,63 @@ class EQAEvaluator:
                 self.model.accelerator.wait_for_everyone()
 
         return eval_tasks
+    
+    def single_inference(self, requests):
+        """
+        Generate responses for a list of requests.
+        
+        Args:
+            requests: List of Instance objects
+            
+        Returns:
+            List[str]: List of generated responses
+        """
+        responses = []
+
+        def process_request(request) -> str:
+            """
+            Process a single request and return the response.
+            
+            Args:
+                request: Instance object containing request information
+                
+            Returns:
+                str: Generated response text
+            """
+            context, gen_kwargs, doc_to_visual, doc_id, task, split = request.args
+            gen_kwargs = gen_kwargs if gen_kwargs else {}
+            
+            # Get visuals for this request
+            if split is not None:
+                visuals = doc_to_visual(self.task_dict[task].dataset[split][doc_id])
+                if isinstance(visuals, tuple):  # ([visual], [visual_index])
+                    visual_list = visuals[0]
+                else:
+                    visual_list = visuals  # [visual]
+            else:
+                visuals = doc_to_visual(self.task_dict.dataset[task][doc_id])
+                if isinstance(visuals, dict):
+                    visual_list = visuals[0]
+                else:
+                    visual_list = visuals
+            
+            return context, visual_list, gen_kwargs
+        
+        eval_logger.info(f"Processing {len(requests)} requests")
+        progress_bar = tqdm(total=len(requests), disable=(self.model.rank != 0), desc="Model Responding")
+        for request in requests:
+            try:
+                context, visual_list, gen_kwargs = process_request(request)
+                response = self.model.respond(context, visual_list, **gen_kwargs).strip()
+                responses.append(response)
+            except Exception as e:
+                eval_logger.error(f"Error processing request: {e}")
+                responses.append("")  # Return empty string on error
+            progress_bar.update(1)
+        
+        progress_bar.close()
+        return responses
+
 
     def evaluate(self, eval_tasks):
         results_dict = collections.defaultdict(dict)
