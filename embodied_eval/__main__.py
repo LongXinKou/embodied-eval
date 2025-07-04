@@ -1,17 +1,9 @@
 import argparse
-import datetime
 import os
 import sys
 
-from accelerate import Accelerator
-from accelerate.utils import InitProcessGroupKwargs
 from loguru import logger as eval_logger
 
-from embodied_eval.tasks import TaskManager
-from embodied_eval.models import get_model
-from embodied_eval.utils import (
-    get_datetime_str
-)
 from embodied_eval.evaluators import build_evaluator
 
 def parse_args():
@@ -30,8 +22,8 @@ def parse_args():
     parser.add_argument(
         "--evaluator",
         type=str,
-        default="EQAEvaluator",
-        help="Choose Evaluator: EQAEvaluator or NavEvaluator. "
+        default="eqa",
+        help="Choose Evaluator: eqa or nav. "
     )
     parser.add_argument(
         "--tasks",
@@ -40,6 +32,7 @@ def parse_args():
     parser.add_argument(
         "--env",
         default=None,
+        help="Environment name for navigation tasks"
     )
     parser.add_argument(
         "--limit",
@@ -52,21 +45,9 @@ def parse_args():
         default=1
     )
     parser.add_argument(
-        "--env",
-        type=str,
-        default=None,
-        help="Environment name for navigation tasks"
-    )
-    parser.add_argument(
-        "--env_args",
-        default="",
-        help="Environment arguments, e.g., config_path=,data_path=",
-    )
-    parser.add_argument(
-        "--evaluator",
-        type=str,
-        default="eqa",
-        help="Evaluator type: eqa or nav"
+        "--inference_only",
+        default=False,
+        type=bool,
     )
     parser.add_argument(
         "--save_results",
@@ -108,14 +89,19 @@ def cli_evaluate(args):
 
     try:
         inference_results = evaluator.inference()
-        results_dict = evaluator.evaluate(inference_results)
-        evaluator.print_results(results_dict)
-        if args.save_results:
-            evaluator.save_results(results_dict)
+        if args.inference_only:
+            eval_logger.info("Inference completed, exiting without evaluation.")
+            return
+        else:
+            eval_logger.info("Inference completed, proceeding to evaluation.")
+            results_dict = evaluator.evaluate(inference_results)
+            evaluator.print_results(results_dict)
+            if args.save_results:
+                eval_logger.info("Saving results...")
+                evaluator.save_results(results_dict)
 
     except Exception as e:
-        eval_logger.error(
-            f"Error during evaluation: {e}.")
+        eval_logger.error(f"Error during evaluation: {e}.")
 
 if __name__ == "__main__":
     args = parse_args()
