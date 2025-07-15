@@ -19,22 +19,21 @@ class EQAEvaluator:
     def __init__(self, config):
         self._config = config
 
-        # ========== Initialize Model ==========
-        model_name = self.config.model
-        model_args = "" if self.config.model_args is None else self.config.model_args
-        self.model = get_model(model_name=model_name).create_from_arg_string(
-            model_args,
-            additional_config={
-                "batch_size": self.config.batch_size,
-            }
-        )
-
         # ========== Initialize TaskManager ==========
         self.task_manager = TaskManager()
         self.task_list = self.config.tasks.split(",")
         self.task_names = self.task_manager.match_tasks(self.task_list)
         eval_logger.info(f"Selected Tasks: {self.task_names}")
         self.task_dict = get_task_dict(self.task_list, self.task_manager)
+
+        # ========== Initialize Model ==========
+        model_name = self.config.model
+        model_args = "" if self.config.model_args is None else self.config.model_args
+        self.model = get_model(model_name=model_name).create_from_arg_string(
+            model_args,
+            additional_config={
+            }
+        )
 
         # Set task_dict for model
         for task_name, task_obj in self.task_dict.items():
