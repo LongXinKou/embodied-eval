@@ -166,7 +166,9 @@ class Qwen2_5_VL(BaseAPIModel):
                 "max_pixels": self.max_pixels, 
                 "min_pixels": self.min_pixels
             }
-        elif isinstance(visual, Image.Image):
+        elif isinstance(visual, Image.Image) or isinstance(visual, np.ndarray):
+            if isinstance(visual, np.ndarray):
+                visual = Image.fromarray(visual)
             # Handle both single and multiple images
             base64_image = visual.convert("RGB")
             buffer = BytesIO()
@@ -270,54 +272,3 @@ class Qwen2_5_VL(BaseAPIModel):
         text_output = self.processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
         
         return text_output.strip()
-
-    def act(self, observation, prompt, **kwargs):
-        """Generate action and reasoning for navigation tasks"""
-        if isinstance(observation, dict):
-            if self.obs_key and self.obs_key in observation:
-                observation = observation[self.obs_key]
-            else:
-                eval_logger.warning(f"Observation does not contain key {self.obs_key}. Using full observation.")
-        else:
-            observation = observation
-
-        # Process visual input 
-        if isinstance(observation, Image.Image):
-            observation = observation
-        elif isinstance(observation, np.ndarray):
-            observation = Image.fromarray(observation)
-        visuals = [observation]
-        processed_visual = [self.process_visuals(visuals)]
-        
-        # Generate response
-        response = self.respond(prompt, processed_visual)
-
-        # TODO Try to parse the response to extract action and reasoning
-        try:
-            import json
-            parsed = json.loads(response)
-            if isinstance(parsed, dict):
-                action = parsed.get('action', response)
-                reasoning = parsed.get('reasoning', response)
-            else:
-                action = response
-                reasoning = response
-        except:
-            # If parsing fails, use the whole response as both action and reasoning
-            action = response
-            reasoning = response
-        
-        return action, reasoning
-
-    def reset(self):
-        """Reset model state for navigation tasks"""
-        self.episode_messages = []
-        self.episode_action_feedback = []
-        self.planner_steps = 0
-        self.output_json_error = 0
-    
-    def update_info(self, info):
-        self.episode_action_feedback.append([
-            info['action_id'],
-            info['env_feedback']
-        ])

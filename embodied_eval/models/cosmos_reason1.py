@@ -134,7 +134,9 @@ class CosmosReason1(BaseAPIModel):
                 "type": "video", 
                 "video": visual, 
             }
-        elif isinstance(visual, Image.Image):
+        elif isinstance(visual, Image.Image) or isinstance(visual, np.ndarray):
+            if isinstance(visual, np.ndarray):
+                visual = Image.fromarray(visual)
             # Handle both single and multiple images
             base64_image = visual.convert("RGB")
             buffer = BytesIO()
