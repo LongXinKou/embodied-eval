@@ -98,9 +98,6 @@ class Qwen2_5_VL(BaseAPIModel):
         self.max_num_frames = max_num_frames
         self.interleave_visuals = interleave_visuals
 
-        # Navagation-related attributes
-        self.obs_key = kwargs.get("obs_key", None)  # Default observation key
-
         # Set up distributed evaluation
         if accelerator.num_processes > 1:
             assert accelerator.distributed_type in [

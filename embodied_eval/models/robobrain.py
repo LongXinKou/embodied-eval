@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 
-from tqdm import tqdm
 from PIL import Image
 
 from accelerate import Accelerator, DistributedType
@@ -12,7 +11,6 @@ from loguru import logger as eval_logger
 
 from embodied_eval.common.registry import register_model
 from embodied_eval.models import BaseAPIModel
-from embodied_eval.utils import Collator
 
 DEFAULT_IMAGE_TOKEN = "<image>"
 
@@ -42,7 +40,6 @@ class RoboBrain(BaseAPIModel):
             device: Optional[str] = "cuda",
             device_map: Optional[str] = "cuda",
             max_length: Optional[int] = 2048,
-            batch_size: Optional[Union[int, str]] = 1,
             max_new_tokens: Optional[int] = 1024,
             temperature: float = 0,
             do_sample: bool = False,
@@ -91,7 +88,6 @@ class RoboBrain(BaseAPIModel):
         # Store configuration
         self._config = self._model.config
         self._max_length = max_length if getattr(self._config, "max_length", None) else self._config.max_length
-        self.batch_size_per_gpu = int(batch_size)
 
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
@@ -102,7 +98,7 @@ class RoboBrain(BaseAPIModel):
         self.system_prompt = system_prompt
 
         self.max_frames_num = max_frames_num
-
+        
         # Set up distributed evaluation
         if accelerator.num_processes > 1:
             self._model = accelerator.prepare_model(self._model, evaluation_mode=True)
@@ -138,166 +134,17 @@ class RoboBrain(BaseAPIModel):
         return self._max_length
 
     @property
-    def batch_size(self):
-        return self.batch_size_per_gpu
-
-    @property
     def device(self):
         return self._device
     
-    def flatten(self, input):
-        """Helper method to flatten a list of lists into a single list."""
-        new_list = []
-        for i in input:
-            for j in i:
-                new_list.append(j)
-        return new_list
+    @property
+    def rank(self):
+        return self._rank
 
-    def generate_until(self, requests) -> List[str]:
-        """Generate text until a stopping sequence."""
-        res = []
-
-        def _sort_by_context_length(x):
-            # Sort by context length for better batching
-            toks = self.processor.tokenizer.encode(x[0])
-            return -len(toks), x[0]
-
-        # Initialize the Collator to group requests and sort them by context length
-        collator = Collator([req.args for req in requests], _sort_by_context_length, grouping=True)
-        # Create batches from the sorted and grouped requests
-        batches = collator.get_batched(n=self.batch_size, batch_fn=None)
-
-        # Determine the number of iterations required to process all requests
-        num_iters = len(requests) // self.batch_size if len(requests) % self.batch_size == 0 else len(requests) // self.batch_size + 1
-        progress_bar = tqdm(total=num_iters, disable=(self.rank != 0), desc="RoboBrain Responding")
-
-        for batch in batches:
-            batch_contexts, all_gen_kwargs, batch_doc_to_visual, batch_doc_id, batch_task, batch_split = zip(*batch)
-            task = batch_task[0]
-            split = batch_split[0]
-            gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
-
-            # Define a stopping sequence if specified
-            until = [self.processor.tokenizer.decode(self.eot_token_id)]
-            if "until" in gen_kwargs:
-                until_from_kwargs = gen_kwargs.pop("until")
-                if isinstance(until_from_kwargs, str):
-                    until = [until_from_kwargs]
-
-            batch_visuals = []
-            for ids in batch_doc_id:
-                doc_to_visual = batch_doc_to_visual[0]
-                if split is not None:
-                    visuals = doc_to_visual(self.task_dict[task][split][ids])
-                    if isinstance(visuals, tuple): # ([visual], [visual_index])
-                        batch_visuals.append(visuals[0])
-                    else:
-                        batch_visuals.append(visuals) # [visual]
-                else:
-                    visuals = doc_to_visual(self.task_dict[task][ids])
-                    if isinstance(visuals, dict):
-                        batch_visuals.append(visuals[0])
-                    else:
-                        batch_visuals.append(visuals)
-            
-            # Get generation parameters
-            if "max_new_tokens" not in gen_kwargs:
-                gen_kwargs["max_new_tokens"] = self.max_new_tokens
-            if "do_sample" not in gen_kwargs:
-                gen_kwargs["do_sample"] = self.do_sample
-            if "temperature" not in gen_kwargs:
-                gen_kwargs["temperature"] = self.temperature
-            if "top_p" not in gen_kwargs:
-                gen_kwargs["top_p"] = self.top_p
-            if "num_beams" not in gen_kwargs:
-                gen_kwargs["num_beams"] = self.num_beams
-            if "use_cache" not in gen_kwargs:
-                gen_kwargs["use_cache"] = self.use_cache
-
-            # Input (input_ids, attention_mask)
-            inputs_list = []
-            input_lengths = []
-            for visual, context in zip(batch_visuals, batch_contexts): 
-                # For image
-                if isinstance(visual[0], Image.Image):
-                    task_type = "image"
-                    if DEFAULT_IMAGE_TOKEN not in context:
-                        image_tokens = [DEFAULT_IMAGE_TOKEN] * len(visual)
-                        context = f"{image_tokens}\n{context}"
-                    messages = [{"role": "user", "content": context}]
-                    if self.processor.tokenizer.chat_template is not None:
-                        text = self.processor.tokenizer.apply_chat_template(
-                            messages, 
-                            tokenize=False, 
-                            add_generation_prompt=True
-                        )
-                    
-                    images = [self._process_image(image) for image in visual]
-                    inputs = self.processor(
-                        images=images,
-                        text=text,
-                        return_tensors="pt"
-                    ).to(self.device, self.model.dtype)
-                elif isinstance(visual[0], str):
-                    task_type = "video"
-                    frames = load_video(visual, self.max_frames_num)
-
-                    if DEFAULT_IMAGE_TOKEN not in context:
-                        image_tokens = [DEFAULT_IMAGE_TOKEN] * len(frames)
-                        context = f"{image_tokens}\n{context}"
-                    messages = [{"role": "user", "content": context}]
-                    if self.processor.tokenizer.chat_template is not None:
-                        text = self.processor.tokenizer.apply_chat_template(
-                            messages, 
-                            tokenize=False, 
-                            add_generation_prompt=True
-                        )
-                    
-                    images = [self._process_image(frame) for frame in frames]
-                    inputs = self.processor(
-                        images=images,
-                        text=text,
-                        return_tensors="pt"
-                    ).to(self.device, self.model.dtype)
-                inputs_list.append(inputs)
-                input_lengths.append(inputs['input_ids'].shape[1])
-                
-            batch_inputs = {}
-            for key in inputs_list[0].keys():
-                batch_inputs[key] = torch.cat([inp[key] for inp in inputs_list], dim=0)
-            batch_inputs = {k: v.to(self.device) for k, v in batch_inputs.items()}
-
-            # Generate output
-            # import inspect
-            # print(inspect.signature(self.model.generate))
-            output = self.model.generate(
-                **batch_inputs,
-                **gen_kwargs
-            )
-
-            generated_ids_trimmed = [out_ids[in_ids:] for in_ids, out_ids in zip(input_lengths, output)]
-            answers = self.processor.batch_decode(
-                generated_ids_trimmed,
-                skip_special_tokens=True,
-            )
-            
-            # Apply stopping sequence if needed
-            for i, ans in enumerate(answers):
-                for term in until:
-                    if len(term) > 0:
-                        ans = ans.split(term)[0]
-                answers[i] = ans
-
-            # Cache result
-            for ans, context in zip(answers, batch_contexts):
-                res.append(ans)
-                progress_bar.update(1)
-
-        # Reorder results to match original order
-        res = collator.get_original(res)
-        progress_bar.close()
-        return res
-
+    @property
+    def world_size(self):
+        return self._world_size
+    
     def _process_image(self, image):
         """Process images for model input."""
         if isinstance(image, Image.Image):
@@ -306,4 +153,78 @@ class RoboBrain(BaseAPIModel):
             return Image.fromarray(image).convert("RGB")
         else:
             return None
+    
+    def respond(self, context, visuals, **gen_kwargs):
+        """
+        Generate a text response based on the given context and visual inputs.
+        Args:
+            context (str): The input text context for the response.
+            visuals (list): A list of visual inputs (e.g., images or videos) to process.
+            gen_kwargs (dict, optional): Additional keyword arguments for text generation.
+        Returns:
+            str: The generated text response.
+        Note:
+            For both image and video tasks, multiple image tokens are inserted into the context, corresponding to the number of images or video frames. 
+            This is because the training data uses multiple <image> tokens for video inputs, treating each frame as an image. This design ensures consistency with the training data format.
+            You can see "https://huggingface.co/datasets/BAAI/ShareRobot/tree/main/planning/jsons" for more details.
+        """   
+        # Process the request
+        if "<image>" in context:
+            context = context.replace("<image>", "")
+
+        # Process visuals - determine if we have images or videos
+        first_visual = visuals[0]
         
+        if isinstance(first_visual, Image.Image) or isinstance(first_visual, np.ndarray):
+            if DEFAULT_IMAGE_TOKEN not in context:
+                image_tokens = [DEFAULT_IMAGE_TOKEN] * len(visuals)
+                context = f"{''.join(image_tokens)}\n{context}"
+            images = [self._process_image(visual) for visual in visuals]
+        elif isinstance(first_visual, str):
+            frames = load_video(visuals, self.max_frames_num)
+            if DEFAULT_IMAGE_TOKEN not in context:
+                image_tokens = [DEFAULT_IMAGE_TOKEN] * len(frames)
+                context = f"{''.join(image_tokens)}\n{context}"
+            images = [self._process_image(frame) for frame in frames]
+            
+        messages = [{"role": "user", "content": context}]
+        text = self.processor.tokenizer.apply_chat_template(
+            messages, 
+            tokenize=False, 
+            add_generation_prompt=True
+        )
+        inputs = self.processor(
+            images=images,
+            text=text,
+            return_tensors="pt"
+        ).to(self.device, self.model.dtype)
+
+        # Get generation parameters
+        if "max_new_tokens" not in gen_kwargs:
+            gen_kwargs["max_new_tokens"] = self.max_new_tokens
+        if "do_sample" not in gen_kwargs:
+            gen_kwargs["do_sample"] = self.do_sample
+        if "temperature" not in gen_kwargs:
+            gen_kwargs["temperature"] = self.temperature
+        if "top_p" not in gen_kwargs:
+            gen_kwargs["top_p"] = self.top_p
+        if "num_beams" not in gen_kwargs:
+            gen_kwargs["num_beams"] = self.num_beams
+        if "use_cache" not in gen_kwargs:
+            gen_kwargs["use_cache"] = self.use_cache
+
+        # Generate output
+        input_length = inputs['input_ids'].shape[1]
+        output = self.model.generate(
+            **inputs,
+            **gen_kwargs
+        )
+
+        # Extract generated text
+        generated_ids_trimmed = output[0][input_length:]
+        answer = self.processor.tokenizer.decode(
+            generated_ids_trimmed,
+            skip_special_tokens=True,
+        )
+        
+        return answer.strip()
