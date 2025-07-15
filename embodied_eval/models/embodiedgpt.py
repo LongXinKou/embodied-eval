@@ -82,7 +82,6 @@ class EmbodiedGPT(BaseAPIModel):
             device: Optional[str] = "cuda",
             device_map: Optional[str] = "cuda",
             max_length: Optional[int] = 2048,
-            batch_size: Optional[Union[int, str]] = 1,
             max_new_tokens: Optional[int] = 1024,
             temperature: float = 0,
             do_sample: bool = False,
@@ -136,7 +135,6 @@ class EmbodiedGPT(BaseAPIModel):
         # Store configuration
         self._config = self._model.config
         self._max_length = max_length if getattr(self._config, "max_length", None) else self._config.max_length
-        self.batch_size_per_gpu = int(batch_size)
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.do_sample = do_sample
@@ -190,10 +188,6 @@ class EmbodiedGPT(BaseAPIModel):
         return self._max_length
     
     @property
-    def batch_size(self):
-        return self.batch_size_per_gpu
-
-    @property
     def device(self):
         return self._device
 
@@ -244,131 +238,106 @@ class EmbodiedGPT(BaseAPIModel):
         video = transform(images_group)
         return video
     
-    def generate_until(self, requests) -> List[str]:
-        """Generate text until a stopping sequence."""
-        res = []
-
-        def _sort_by_context_length(x):
-            # Sort by context length for better batching
-            toks = self.tokenizer.encode(x[0])
-            return -len(toks), x[0]
+    def respond(self, context, visuals, **gen_kwargs):
+        """
+        Generate a text response based on the given context and visual inputs.
+        Args:
+            context (str): The input text context for the response.
+            visuals (list): A list of visual inputs (e.g., images or videos) to process.
+            gen_kwargs (dict, optional): Additional keyword arguments for text generation.
+        Returns:
+            str: The generated text response.
+        """
+        # Set default generation parameters
+        gen_kwargs = dict(gen_kwargs) if gen_kwargs else {}
+        if "until" in gen_kwargs:
+            gen_kwargs.pop("until")
         
-        # Initialize the Collator to group requests and sort them by context length
-        collator = Collator([req.args for req in requests], _sort_by_context_length, grouping=True)
-        # Create batches from the sorted and grouped requests
-        batches = collator.get_batched(n=self.batch_size, batch_fn=None)
+        if "max_new_tokens" not in gen_kwargs:
+            gen_kwargs["max_new_tokens"] = self.max_new_tokens
+        if "do_sample" not in gen_kwargs:
+            gen_kwargs["do_sample"] = self.do_sample
+        if "temperature" not in gen_kwargs:
+            gen_kwargs["temperature"] = self.temperature
+        if "top_p" not in gen_kwargs:
+            gen_kwargs["top_p"] = self.top_p
+        if "num_beams" not in gen_kwargs:
+            gen_kwargs["num_beams"] = self.num_beams
+        if "use_cache" not in gen_kwargs:
+            gen_kwargs["use_cache"] = self.use_cache
 
-        # Determine the number of iterations required to process all requests
-        num_iters = len(requests) // self.batch_size if len(requests) % self.batch_size == 0 else len(requests) // self.batch_size + 1
-        progress_bar = tqdm(total=num_iters, disable=(self.rank != 0), desc="EmbodiedGPT Responding")
+        # Process visual inputs
+        if isinstance(visuals[0], Image.Image):
+            modal_type = "image"
+            pixel_values = [self.load_image(img) for img in visuals]
+            # Limit to max_num_frames
+            if len(pixel_values) > self.max_num_frames:
+                pixel_values = pixel_values[:self.max_num_frames]
+            pixel_values = torch.cat(pixel_values, dim=0)
+            if len(visuals) > 1:
+                TC, H, W = pixel_values.shape
+                pixel_values = pixel_values.reshape(TC // 3, 3, H, W).transpose(0, 1)
+        elif isinstance(visuals[0], str):
+            modal_type = "video"
+            pixel_values = self.load_video(visuals[0], self.max_num_frames)
+            TC, H, W = pixel_values.shape
+            pixel_values = pixel_values.reshape(TC // 3, 3, H, W).transpose(0, 1)
+        else:
+            raise ValueError(f"Unsupported visual type: {type(visuals[0])}")
 
-        for batch in batches:
-            batch_contexts, all_gen_kwargs, batch_doc_to_visual, batch_doc_id, batch_task, batch_split = zip(*batch)
-            task = batch_task[0]
-            split = batch_split[0]
+        pixel_values = pixel_values.unsqueeze(0).to(dtype=torch.float16, device=self.device)
+        language_model_inputs = self.model.extract_feature(pixel_values)
 
-            gen_kwargs = all_gen_kwargs[0] if all_gen_kwargs else {}
-            if "until" in gen_kwargs:
-                gen_kwargs.pop("until")
+        # Format the question with visual tokens
+        if modal_type == "image":
+            question = self.image_query + "\n" + context
+        elif modal_type == "video":
+            question = self.video_query + "\n" + context
+        else:
+            question = context
             
-            # Get generation parameters
-            if "max_new_tokens" not in gen_kwargs:
-                gen_kwargs["max_new_tokens"] = self.max_new_tokens
-            if "do_sample" not in gen_kwargs:
-                gen_kwargs["do_sample"] = self.do_sample
-            if "temperature" not in gen_kwargs:
-                gen_kwargs["temperature"] = self.temperature
-            if "top_p" not in gen_kwargs:
-                gen_kwargs["top_p"] = self.top_p
-            if "num_beams" not in gen_kwargs:
-                gen_kwargs["num_beams"] = self.num_beams
-            if "use_cache" not in gen_kwargs:
-                gen_kwargs["use_cache"] = self.use_cache
+        # Prepare conversation
+        conv = self.conv.copy()
+        conv.append_message(conv.roles[0], question)
+        conv.append_message(conv.roles[1], None)
+        conversation = conv.get_prompt()
+        
+        # Tokenize input
+        model_inputs = self.tokenizer(
+            [conversation],
+            return_tensors="pt",
+        )
+        model_inputs.pop("token_type_ids", None)
 
-            batch_visuals = []
-            for ids in batch_doc_id:
-                doc_to_visual = batch_doc_to_visual[0]
-                if split is not None:
-                    visuals = doc_to_visual(self.task_dict[task][split][ids])
-                    if isinstance(visuals, tuple): # ([visual], [visual_index])
-                        batch_visuals.append(visuals[0])
-                    else:
-                        batch_visuals.append(visuals) # [visual]
-                else:
-                    visuals = doc_to_visual(self.task_dict[task][ids])
-                    if isinstance(visuals, dict):
-                        batch_visuals.append(visuals[0])
-                    else:
-                        batch_visuals.append(visuals)
+        input_ids = model_inputs["input_ids"].to(self.device)
+        attention_mask = model_inputs["attention_mask"].to(self.device)
+
+        # Set up stopping criteria
+        stop_words = ["Human: ", "Assistant: ", "###", "\n\n"]
+        stop_words_ids = [self.tokenizer(stop_word, return_tensors='pt')['input_ids'].squeeze() for stop_word in stop_words]
+        gen_kwargs["stopping_criteria"] = StoppingCriteriaList([StoppingCriteriaSub(stops=stop_words_ids)])
+
+        # Generate response
+        try:
+            with torch.inference_mode():
+                generation_output = self.model.generate(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    pixel_values=pixel_values,
+                    language_model_inputs=language_model_inputs,
+                    return_dict_in_generate=True,
+                    output_scores=True,
+                    **gen_kwargs,
+                )
             
-            conversations = []
-            for visual, context in zip(batch_visuals, batch_contexts): # for multi-modal task
-                # For image tasks
-                if isinstance(visual[0], Image.Image):
-                    modal_type = "image"
-                    pixel_values = [self.load_image(img) for img in visual]
-                    # FIXME max_num_frame=8
-                    if len(pixel_values) > self.max_num_frames:
-                        pixel_values = pixel_values[:self.max_num_frames]
-                    pixel_values = torch.cat(pixel_values, dim=0)
-                    if len(visual) > 1:
-                        TC, H, W = pixel_values.shape
-                        pixel_values = pixel_values.reshape(TC // 3, 3, H, W).transpose(0, 1)
-                # For video task
-                elif isinstance(visual[0], str):
-                    modal_type = "video"
-                    pixel_values = self.load_video(visual[0], self.max_num_frames)
-                    TC, H, W = pixel_values.shape
-                    pixel_values = pixel_values.reshape(TC // 3, 3, H, W).transpose(0, 1)
-                pixel_values = pixel_values.unsqueeze(0).to(dtype=torch.float16, device=self.device)
-                language_model_inputs = self.model.extract_feature(pixel_values)
-
-                if modal_type == "image":
-                    question = self.image_query + "\n" + context
-                elif modal_type == "video":
-                    question = self.video_query + "\n" + context
-                else:
-                    question = context
-                
-                conv = self.conv.copy()
-                conv.append_message(conv.roles[0], question)
-                conv.append_message(conv.roles[1], None)
-                conversations.append(conv.get_prompt())
+            preds = generation_output.sequences
+            text_output = self.tokenizer.batch_decode(preds, skip_special_tokens=True)[0]
             
-            model_inputs = self.tokenizer(
-                conversations,
-                return_tensors="pt",
-            )
-            model_inputs.pop("token_type_ids", None)
-
-            input_ids = model_inputs["input_ids"].to(self.device)
-            attention_mask = model_inputs["attention_mask"].to(self.device)
-
-            stop_words = ["Human: ", "Assistant: ", "###", "\n\n"]
-            stop_words_ids = [self.tokenizer(stop_word, return_tensors='pt')['input_ids'].squeeze() for stop_word in stop_words]
-            gen_kwargs["stopping_criteria"] = StoppingCriteriaList([StoppingCriteriaSub(stops=stop_words_ids)])
-
-            try:
-                with torch.inference_mode():
-                    generation_output = self.model.generate(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        pixel_values=pixel_values,
-                        language_model_inputs=language_model_inputs,
-                        return_dict_in_generate=True,
-                        output_scores=True,
-                        **gen_kwargs,
-                    )
-                preds = generation_output.sequences
-                text_outputs = self.tokenizer.batch_decode(preds, skip_special_tokens=True)
-            except Exception as e:
-                raise e
-
-            text_outputs = [response.strip() for response in text_outputs]
-            res.extend(text_outputs)
-            progress_bar.update(1)
-
-        # Reorder results to match original order
-        res = collator.get_original(res)
-        progress_bar.close()
-        return res
+            # Clean up GPU memory
+            torch.cuda.empty_cache()
+            
+            return text_output.strip()
+            
+        except Exception as e:
+            eval_logger.error(f"Error during EmbodiedGPT inference: {e}")
+            return "Error processing input."
