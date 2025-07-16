@@ -7,6 +7,7 @@ import numpy as np
 import time
 import json
 import os
+import re
 import sys
 import math
 
@@ -153,6 +154,22 @@ class EBNavigationEnv(gym.Env):
         self.boundingbox = boundingbox
         self.multistep = multistep
         self.img_paths = []
+    
+    @property
+    def actions(self):
+        return self.language_skill_set
+    
+    @property
+    def available_action_str(self):
+        return self.get_availabel_action_prompt(self.actions)
+    
+    def get_availabel_action_prompt(self, available_actions):
+        available_action_str = ''
+        for i in range(len(available_actions)):
+            available_action_str += '\naction id ' + str(i) + ': ' + str(available_actions[i]) 
+            if i < len(available_actions) - 1:
+                available_action_str += ', '
+        return available_action_str
 
     def _load_dataset(self, eval_set):
         with open(self.data_path) as f:
@@ -223,6 +240,7 @@ class EBNavigationEnv(gym.Env):
         obs = {
             'head_rgb': self.env.last_event.frame
         }
+        obs = obs[self.obs_key] if self.obs_key and self.obs_key in obs else obs
         self._reset = True
         self.episode_log = []
         self._episode_start_time = time.time()
@@ -231,6 +249,93 @@ class EBNavigationEnv(gym.Env):
 
         return obs
     
+    def generate_prompt(self, user_instruction, prev_act_feedback = [], **kwarg):
+        user_instruction = user_instruction.rstrip('.')
+
+        n_shot = kwarg.get('n_shot', 0)
+        examples = kwarg.get('example', None)
+        language_only = kwarg.get('language_only', False)
+        chat_history = kwarg.get('chat_history', True)
+        use_feedback = kwarg.get('use_feedback', True)   
+
+        if len(prev_act_feedback) == 0:
+            if n_shot >= 1:
+                prompt = self.system_prompt.format(len(self.actions)-1, self.available_action_str, '\n\n'.join([f'## Task Execution Example {i}: \n {x}' for i,x in enumerate(examples[:n_shot])])) 
+            else:
+                prompt = self.system_prompt.format(len(self.actions)-1, self.available_action_str, '')
+
+            prompt += f'\n\n## Now the human instruction is: {user_instruction}.'
+            if language_only:
+                prompt += f" You are supposed to output in json. You need to output your reasoning steps and plan. At the end, output the action id (0 ~ {len(self.actions)-1}) from the available actions to excute."
+            else:
+                prompt += f" You are supposed to output in json. You need to describe current visual state from the image, output your reasoning steps and plan. At the end, output the action id (0 ~ {len(self.actions)-1}) from the available actions to excute."
+        
+        elif chat_history:
+            prompt = f'The human instruction is: {user_instruction}.'
+            prompt += '\n\n The action history:'
+            for i, action_feedback in enumerate(prev_act_feedback):
+                if use_feedback:
+                    prompt += '\nStep {}, action id {}, {}, env feedback: {}'.format(i, action_feedback[0], self.actions[action_feedback[0]], action_feedback[1])
+                else:
+                    prompt += '\nStep {}, action id {}, {}'.format(i, action_feedback[0], self.actions[action_feedback[0]])
+
+            if language_only:
+                prompt += f'''\n\n Considering the above interaction history, to achieve the human instruction: '{user_instruction}', you are supposed to output in json. You need to summarize interaction history {'and environment feedback ' if use_feedback else ''}and reason why the last action or plan failed and did not finish the task, output your new plan to achieve the goal from current state. At the end, output the executable plan with action ids(0 ~ {len(self.actions)-1}) from the available actions.'''
+            else:
+                prompt += f'''\n\n Considering the above interaction history and the current image state, to achieve the human instruction: '{user_instruction}', you are supposed to output in json. You need to describe current visual state from the image, summarize interaction history {'and environment feedback ' if use_feedback else ''}and reason why the last action or plan failed and did not finish the task, output your new plan to achieve the goal from current state. At the end, output the excutable plan with action ids(0 ~ {len(self.actions)-1}) from the available actions.'''
+        else:
+            if n_shot >= 1:
+                prompt = self.system_prompt.format(len(self.actions)-1, self.available_action_str, '\n\n'.join([f'## Task Execution Example  {i}: \n {x}' for i,x in enumerate(examples[:n_shot])])) 
+            else:
+                prompt = self.system_prompt.format(len(self.actions)-1, self.available_action_str, '')
+            prompt += f'\n\n## Now the human instruction is: {user_instruction}.'
+            prompt += '\n\n The action history:'
+            for i, action_feedback in enumerate(prev_act_feedback):
+                if use_feedback:
+                    prompt += '\nStep {}, action id {}, {}, env feedback: {}'.format(i, action_feedback[0], self.actions[action_feedback[0]], action_feedback[1])
+                else:
+                    prompt += '\nStep {}, action id {}, {}'.format(i, action_feedback[0], self.actions[action_feedback[0]])
+
+            if language_only:
+                prompt += f'''\n\n Considering the above interaction history, to achieve the human instruction: '{user_instruction}', you are supposed to output in json. You need to summarize interaction history {'and environment feedback ' if use_feedback else ''}and reason why the last action or plan failed and did not finish the task, output your new plan to achieve the goal from current state. At the end, output the excutable plan with action ids(0 ~ {len(self.actions)-1}) from the available actions.'''
+            else:
+                prompt += f'''\n\n Considering the above interaction history and the current image state, to achieve the human instruction: '{user_instruction}', you are supposed to output in json. You need to describe current visual state from the image, summarize interaction history {'and environment feedback ' if use_feedback else ''}and reason why the last action or plan failed and did not finish the task, output your new plan to achieve the goal from current state. At the end, output the excutable plan with action ids(0 ~ {len(self.actions)-1}) from the available actions.'''
+        return prompt
+
+    def parse_action_response(self, response):
+        """
+        Parse the action and reasoning from the model's response.
+
+        Supports both:
+        - A single JSON object: {"action_id": 1, "reasoning": "..."}
+        - A list of JSON objects: [{"action_id": 1, "reasoning": "..."}, {...}]
+        
+        :param response: The raw string response from the model.
+        :return: A tuple (action_index, reasoning) from the first object, or (None, "") if parsing fails.
+        """
+        try:
+            blocks = re.findall(r'```json\s*([\s\S]*?)```', response)
+            response_json = json.loads(blocks[-1])
+            if isinstance(response_json, list):
+                action_index = [int(item.get("action_id", -1)) for item in response_json]
+                reasoning = [item.get("reasoning", item.get("reason", "")) for item in response_json]
+                # Validate action indices in list
+                for idx in action_index:
+                    if idx < 0 or idx >= len(self.actions):
+                        eval_logger.error(f"Invalid action index {idx}. Must be between 0 and {len(self.actions)-1}")
+                        return None, ""
+            else:
+                action_index = int(response_json.get("action_id", -1))
+                reasoning = response_json.get("reasoning", response_json.get("reason", ""))
+                # Validate single action index
+                if action_index < 0 or action_index >= len(self.actions):
+                    eval_logger.error(f"Invalid action index {action_index}. Must be between 0 and {len(self.actions)-1}")
+                    return None, ""
+            return action_index, reasoning
+        except (json.JSONDecodeError, ValueError) as e:
+            eval_logger.error(f"Failed to parse response: {response}. Error: {e}")
+            return None, ""
+
     def discrete_action_mapper(self, action_index):
         """
         Maps a discrete action index to the corresponding iTHOR environment action.
@@ -329,8 +434,9 @@ class EBNavigationEnv(gym.Env):
         #info['action_description'] = self.language_skill_set[action]
 
         obs = {
-                    'head_rgb': self.env.last_event.frame,
-                }
+            'head_rgb': self.env.last_event.frame,
+        }
+        obs = obs[self.obs_key] if self.obs_key and self.obs_key in obs else obs
         reward, distance = self.measure_success()
 
         ## test calculate reward
