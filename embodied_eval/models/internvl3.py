@@ -345,7 +345,5 @@ class InternVL3(BaseAPIModel):
             response = "Error processing input."
         return response
 
-    def act(self, observation, instruction, **kwargs):
-        return super().act(observation, instruction, **kwargs)
 
 
