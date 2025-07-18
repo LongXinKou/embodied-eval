@@ -8,9 +8,6 @@
 - - [ ] A-EQA 
 - [ ] GOAT-Bench
 
-1. 数据和模型的绝对路径 --> 相对路径
-2. ERQA --> tfrecore 2 huggingface 
-
 
 ## 🔨 Setup
 1. Clone this repository & Install packages
