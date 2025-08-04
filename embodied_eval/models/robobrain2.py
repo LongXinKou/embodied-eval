@@ -5,6 +5,7 @@ import base64
 import decord
 import torch
 import numpy as np
+import re
 
 from accelerate import Accelerator, DistributedType
 from decord import VideoReader, cpu
@@ -29,6 +30,7 @@ class RoboBrain2(BaseAPIModel):
     def __init__(
             self,
             model_name_or_path: str = "BAAI/RoboBrain2.0-7B",
+            torch_dtype = torch.float16, 
             device: Optional[str] = "cuda",
             device_map: Optional[str] = "cuda",
             max_length: Optional[int] = 2048,
@@ -39,7 +41,10 @@ class RoboBrain2(BaseAPIModel):
             num_beams: Optional[int] = 1,
             use_cache: Optional[bool] = True,
             system_prompt: Optional[str] = None,
+            use_flash_attention_2: Optional[bool] = False,
             max_num_frames: int = 8,
+            min_pixels = 256 * 28 * 28,
+            max_pixels = 1280 * 28 * 28, 
             enable_thinking: bool = False,
             **kwargs,
     ) -> None:
@@ -56,12 +61,21 @@ class RoboBrain2(BaseAPIModel):
 
         # Load model
         eval_logger.info(f"Loading RoboBrain2.0 model from {model_name_or_path}")
-        self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            model_name_or_path,
-            torch_dtype=torch.float16,
-            low_cpu_mem_usage=True,
-            device_map=self.device_map
-        )
+        if use_flash_attention_2:
+            self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                model_name_or_path,
+                torch_dtype=torch_dtype,
+                low_cpu_mem_usage=True,
+                device_map=self.device_map,
+                attn_implementation="flash_attention_2",
+            )
+        else:
+            self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                model_name_or_path,
+                torch_dtype=torch_dtype,
+                low_cpu_mem_usage=True,
+                device_map=self.device_map,
+            )
 
         # Load processor
         self._processor = AutoProcessor.from_pretrained(model_name_or_path)
@@ -77,7 +91,9 @@ class RoboBrain2(BaseAPIModel):
         self.num_beams = num_beams
         self.use_cache = use_cache
         self.system_prompt = system_prompt
-
+        
+        self.max_pixels = max_pixels
+        self.min_pixels = min_pixels
         self.max_num_frames = max_num_frames
         self.enable_thinking = enable_thinking
         
@@ -136,7 +152,9 @@ class RoboBrain2(BaseAPIModel):
             height, width = first_frame.shape[:2]
             processed_visual = {
                 "type": "video", 
-                "video": visual, 
+                "video": visual,
+                # "max_pixels": self.max_pixels, 
+                # "min_pixels": self.min_pixels 
             }
         elif isinstance(visual, Image.Image) or isinstance(visual, np.ndarray):
             if isinstance(visual, np.ndarray):
@@ -149,7 +167,9 @@ class RoboBrain2(BaseAPIModel):
             base64_string = base64_bytes.decode("utf-8")
             processed_visual = {
                 "type": "image", 
-                "image": f"data:image/jpeg;base64,{base64_string}", 
+                "image": f"data:image/jpeg;base64,{base64_string}",
+                # "max_pixels": self.max_pixels, 
+                # "min_pixels": self.min_pixels 
             }
         return processed_visual
 
@@ -211,7 +231,7 @@ class RoboBrain2(BaseAPIModel):
         image_inputs, video_inputs = process_vision_info(message)
         if video_inputs is not None:
             total_frames = video_inputs[0].shape[0]
-            if total_frames < self.max_num_frames:
+            if total_frames > self.max_num_frames:
                 indices = np.linspace(0, total_frames - 1, self.max_num_frames, dtype=int)
                 # Append the last frame index if not already included
                 if total_frames - 1 not in indices:
@@ -237,9 +257,51 @@ class RoboBrain2(BaseAPIModel):
 
         if self.enable_thinking:
             thinking_text = output_text[0].split("</think>")[0].replace("<think>", "").strip()
-            answer_text = output_text[0].split("</think>")[1].replace("<answer>", "").replace("</answer>", "").strip()
+            answer_text = output_text[0].split("</think>")[1]
         else:
             thinking_text = ""
-            answer_text = output_text[0].replace("<answer>", "").replace("</answer>", "").strip()
+            answer_text = output_text[0]
         
-        return answer_text.strip()
+        # Clean up the answer text
+        answer_text = self.postprocess(answer_text)
+
+        return answer_text
+    
+    def postprocess(self, response: str) -> str:
+        """
+        Post-process the generated response.
+        Args:
+            response (str): The raw response from the model.
+        Returns:
+            str: The cleaned-up response.
+        """
+        # Remove any unwanted tags or formatting
+        response = re.sub(r"</?think>", "", response)
+        response = re.sub(r"</?answer>", "", response)
+        response = re.sub(r"</?p>", "", response)
+        
+        # Basic cleanup
+        response = response.strip()
+        
+        # For simple cases where the response is just a single character (like A, B, C, D)
+        if len(response) == 1 and response.isalpha():
+            return response.upper()
+        
+        # Pattern matching for common answer formats
+        # Look for "Answer: X" or "The answer is X"
+        answer_patterns = [
+            r'(?:answer|Answer)(?:\s*is)?\s*:\s*([^\n\r\.]+)',
+            r'(?:the|The)\s+answer\s+is\s+([^\n\r\.]+)',
+            r'^\s*([A-Za-z])\s*[\.\):]?\s*$',  # Single letter answer
+        ]
+
+        for pattern in answer_patterns:
+            match = re.search(pattern, response, re.IGNORECASE)
+            if match:
+                answer = match.group(1).strip()
+                # For single character answers (multiple choice), return uppercase
+                if len(answer) == 1 and answer.isalpha():
+                    return answer.upper()
+                return answer
+
+        return response
