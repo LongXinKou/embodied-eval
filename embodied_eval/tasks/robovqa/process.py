@@ -10,10 +10,21 @@ import re
 import pandas as pd
 
 from collections import defaultdict
+from openai import OpenAI
+from typing import Optional
+from tqdm import tqdm
 from loguru import logger as eval_logger
 
+os.environ["OPENAI_API_KEY"] = ""
+os.environ["OPENAI_API_BASE"] = ""
+client = OpenAI(
+    api_key = os.getenv("OPENAI_API_KEY"),
+    base_url = os.getenv("OPENAI_API_BASE")
+)
+
 METRICS_FOR_ROBOVQA = {
-    "BELU": "BELU_Eval"
+    # "BELU": "BELU_Eval"
+    "llm_match_score": "llm_match"
 }
 ROBOVQA_QUESTION_TYPES = [
     "past_description:freeform",
@@ -51,8 +62,11 @@ def robovqa_process_results(doc, results, dataset_kwargs=None):
     result_dict["question_type"] = question_type
     for key, value in METRICS_FOR_ROBOVQA.items():
         pred = pred_raw
-        score = eval(value)(pred, target)
-        doc[key] = {'score': score.score, 'precisions': score.precisions, "bp": score.bp}
+        # score = eval(value)(pred, target)
+        # doc[key] = {'score': score.score, 'precisions': score.precisions, "bp": score.bp}
+        score = eval(value)(doc["question"], target, pred)
+        doc[key] = {key: score}
+
         result_dict[key] = doc[key]
 
     return result_dict
@@ -69,18 +83,20 @@ def robovqa_aggregate_results(results):
         if question_type in ROBOVQA_QUESTION_TYPES:
             for metric in METRICS_FOR_ROBOVQA.keys():
                 metric_data = per_question_type[metric].tolist()
-                avg_score = np.mean([x['score'] for x in metric_data])
-                avg_bp = np.mean([x['bp'] for x in metric_data])
-                avg_precisions = np.mean([x['precisions'] for x in metric_data], axis=0)  # element-wise mean for 4-gram precisions
+                # avg_score = np.mean([x['score'] for x in metric_data])
+                # avg_bp = np.mean([x['bp'] for x in metric_data])
+                # avg_precisions = np.mean([x['precisions'] for x in metric_data], axis=0)  # element-wise mean for 4-gram precisions
 
+                # output[f"{question_type}_{metric}"] = avg_score
+                # output[f"{question_type}_{metric}-bp"] = avg_bp
+                # output[f"{question_type}_{metric}1"] = avg_precisions[0]
+
+                # if 'freeform' in question_type:
+                #     output[f"{question_type}_{metric}2"] = avg_precisions[1]
+                #     output[f"{question_type}_{metric}3"] = avg_precisions[2]
+                #     output[f"{question_type}_{metric}4"] = avg_precisions[3]
+                avg_score = np.mean([x[metric] for x in metric_data])
                 output[f"{question_type}_{metric}"] = avg_score
-                output[f"{question_type}_{metric}-bp"] = avg_bp
-                output[f"{question_type}_{metric}1"] = avg_precisions[0]
-
-                if 'freeform' in question_type:
-                    output[f"{question_type}_{metric}2"] = avg_precisions[1]
-                    output[f"{question_type}_{metric}3"] = avg_precisions[2]
-                    output[f"{question_type}_{metric}4"] = avg_precisions[3]
     
     metric_to_values = defaultdict(list)
     for key, val in output.items():
@@ -106,20 +122,120 @@ def BELU_Eval(pred_answer, answer):
     )
     return bleu
 
-def extract_task_type_tags(task_type_string: str) -> list:
-    if not task_type_string:
-        return []
-    tags = task_type_string.split(':')
-    return tags
+def llm_match(
+        question: str,
+        answer: str,
+        prediction: str,
+        extra_answers = None,
+        openai_model: str = "gpt-4o-mini",
+        openai_seed: int = 1234,
+        openai_max_tokens: int = 128,
+        openai_temperature: float = 0.2,
+        verbose: bool = False,
+        max_tries: int = 3,
+    ):
+    import time
+    
+    if prediction is None:
+        return 0
+    
+    prompt = load_prompt()
 
-def extract_yes_no(pred):
-    pred_lower = pred.lower()
-    if "yes" in pred_lower:
-        return "yes"
-    elif "no" in pred_lower:
-        return "no"
-    else:
-        return "unknown"
+    messages = prepare_openai_messages(
+        prompt.format(
+            question=question,
+            answer=answer,
+            prediction=prediction,
+            extra_answers=extra_answers,
+        ),
+    )
+    
+    for attempt in range(max_tries):
+        try:
+            output = call_openai_api(
+                messages=messages,
+                model=openai_model,
+                seed=openai_seed,
+                max_tokens=openai_max_tokens,
+                temperature=openai_temperature,
+                verbose=verbose,
+            )
+            return parse_score(output)
+        except Exception as e:
+            if attempt < max_tries - 1:
+                eval_logger.warning(f"LLM evaluation failed (attempt {attempt + 1}/{max_tries}): {e}")
+                time.sleep(1)  # Wait 1 second before retrying
+            else:
+                eval_logger.error(f"LLM evaluation failed after {max_tries} attempts: {e}")
+                return 0  # Return 0 score if all attempts fail
+
+
+def load_prompt():
+    prompt = """
+    You are an AI assistant who will help me to evaluate the response given the question and the correct answer.
+    To mark a response, you should output a single integer between 1 and 5 (including 1, 5).
+    5 means that the response perfectly matches the answer.
+    1 means that the response is completely different from the answer.
+
+    Example 1:
+    Question: Is it overcast?
+    Answer: no
+    Response: yes
+    Your mark: 1
+
+    Example 2:
+    Question: Who is standing at the table?
+    Answer: woman
+    Response: Jessica
+    Your mark: 3
+
+    Example 3:
+    Question: Are there drapes to the right of the bed?
+    Answer: yes
+    Response: yes
+    Your mark: 5
+
+    Your Turn:
+    Question: {question}
+    Answer: {answer}
+    Response: {prediction}    
+    """
+    return prompt
+
+def prepare_openai_messages(content: str):
+    return [{"role": "user", "content": content}]
+
+def call_openai_api(
+    messages: list,
+    model: str = "gpt-4o",
+    seed = None,
+    max_tokens: int = 32,
+    temperature: float = 0.2,
+    verbose: bool = False,
+):
+    completion = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        seed=seed,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    if verbose:
+        print("openai api response: {}".format(completion))
+    assert len(completion.choices) == 1
+    return completion.choices[0].message.content
+
+
+def parse_score(output: str, tag: str = "Your mark:") -> str:
+    if output.isdigit():
+        return int(output)
+    start_idx = output.find(tag)
+    if start_idx == -1:
+        raise ValueError("Invalid output string: {}".format(output))
+    end_idx = output.find("\n", start_idx)
+    if end_idx == -1:
+        return int(output[start_idx:].replace(tag, "").strip())
+    return int(output[start_idx:end_idx].replace(tag, "").strip())
 
 def post_evaluate_results(sample_file_path, results_file_path):
     import json
@@ -127,24 +243,23 @@ def post_evaluate_results(sample_file_path, results_file_path):
         data = [json.loads(line) for line in f]
 
     results = []
-    for doc in data:
+    for doc in tqdm(data):
         pred_raw = doc["resps"][0][0] if doc["resps"] and doc["resps"][0] else ""
         target = doc["target"]
         question_type = doc["question_type"]
+        question = doc.get("question", doc.get("doc", ""))
 
+        result_dict = {"target": target}
+        result_dict["question_type"] = question_type
+        
         for key, value in METRICS_FOR_ROBOVQA.items():
-            if "discrete" in question_type:
-                pred = extract_yes_no(pred_raw)
-            else:
-                pred = pred_raw
-            score = eval(value)(pred, target)
-            doc[key] = {'score': score.score, 'precisions': score.precisions, "bp": score.bp} # re-eval
+            pred = pred_raw
+            # Call the evaluation function directly with the new signature
+            score = eval(value)(question, target, pred)
+            doc[key] = {key: score}
+            result_dict[key] = doc[key]
 
-            result_dict = {
-                "question_type": question_type,
-                key: doc[key]
-            }
-            results.append(result_dict)
+        results.append(result_dict)
 
     # samples_robovqa.json
     with open(sample_file_path, "w", encoding="utf-8") as f:
@@ -157,7 +272,8 @@ def post_evaluate_results(sample_file_path, results_file_path):
         json.dump(output, f, ensure_ascii=False, indent=2)
 
 if __name__ == '__main__':
+    base_dir = "/home/lx/embodied-eval/logs/logs_robobrain2/robovqa-7b/"
     post_evaluate_results(
-        sample_file_path="",
-        results_file_path=""
+        sample_file_path=f"{base_dir}/samples_robovqa.json",
+        results_file_path=f"{base_dir}/results_robovqa.json"
     )
