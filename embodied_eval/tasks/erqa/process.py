@@ -33,8 +33,40 @@ def erqa_doc_to_visual(doc, dataset_kwargs=None):
 def erqa_doc_to_text(doc, dataset_kwargs=None):
     return doc["question"]
 
+def extract_single_word_option(text):
+    """
+    Extract a single word option from the prediction text.
+    Handles various response formats and extracts the most likely answer.
+    """
+    if not text:
+        return ""
+    
+    # Clean the text
+    text = text.strip()
+    
+    # Common patterns for extracting answers
+    import re
+    
+    # Pattern 1: Look for "Answer: X" or "The answer is X"
+    answer_patterns = [
+        r'(?:answer|Answer)(?:\s*is)?\s*:\s*([A-Za-z]+)',
+        r'(?:the|The)\s+answer\s+is\s+([A-Za-z]+)',
+        r'^\s*([A-Za-z])\s*[\.\):]',  # Single letter at start with punctuation
+        r'\b([A-Za-z])\s*[\.\):]?\s*$',  # Single letter at end
+    ]
+    
+    for pattern in answer_patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip()
+    
+    return text
+
 def erqa_process_results(doc, results, dataset_kwargs=None):
-    doc["prediction"] = results[0]
+    pred_raw = results[0]
+    # Process the raw prediction to extract single word option
+    processed_pred = extract_single_word_option(pred_raw)
+    doc["prediction"] = processed_pred
     target = doc["answer"]
 
     result_dict = {"target": target}
@@ -84,11 +116,13 @@ def post_evaluate_results(sample_file_path, results_file_path):
     results = []
     for doc in data:
         pred_raw = doc["resps"][0][0] if doc["resps"] and doc["resps"][0] else ""
+        # Process the raw prediction to extract single word option
+        processed_pred = extract_single_word_option(pred_raw)
         target = doc["target"]
         question_type = doc["question_type"]
 
         for key, value in METRICS_FOR_ERQA.items():
-            doc[key] = eval(value)(pred_raw, target)
+            doc[key] = eval(value)(processed_pred, target)
 
             result_dict = {
                 "question_type": question_type,
