@@ -20,7 +20,10 @@ AVAILABLE_MODELS = {
     "robobrain": "RoboBrain",
     "robobrain2": "RoboBrain2",
     "magma": "Magma",
+    "vebrain": "VeBrain",
     "cosmos_reason1": "CosmosReason1",
+    "spacer": "SpaceR",
+    "roboannotatorx": "RoboAnnotatorX",
     "embodiedgpt": "EmbodiedGPT",
     "robopoint": "RoboPoint",
     "spatialvlm": "SpatialVLM"
