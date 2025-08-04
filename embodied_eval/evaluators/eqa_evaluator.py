@@ -190,6 +190,9 @@ class EQAEvaluator:
                     "doc": requests[0].args[0],
                     "resps": [req.resps for req in requests],
                 }
+                for key in ["image", "images", "video"]:
+                    if doc.get(key) is not None:
+                        example[key] = doc[key]
                 example.update({key: value for key, value in sample_result.items()})
                 task_output.logged_samples.append(example)
 
