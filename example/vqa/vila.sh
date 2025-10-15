@@ -5,7 +5,7 @@ PORT=$(python -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.get
 
 accelerate launch --num_processes=2 --main_process_port=$PORT -m embodied_eval \
     --model vila \
-    --model_args model_name_or_path=hf_model/vila1_5-13B/,max_num_frames=8,model_name=VILA1.5-13B \
+    --model_args model_name_or_path=/8T/klx/klx/hf_model/vila1_5-13B/,max_num_frames=8,model_name=VILA1.5-13B \
     --tasks erqa \
     --batch_size 1 \
-    --output_path logs/logs_vila
+    --output_path /home/lx/embodied-eval/logs/logs_vila

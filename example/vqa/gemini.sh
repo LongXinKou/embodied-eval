@@ -6,4 +6,4 @@ python -m embodied_eval \
     --model_args model_name_or_path=gemini-2.5-pro,max_frames_num=8 \
     --tasks vsibench \
     --batch_size 1 \
-    --output_path logs/logs_gemini-2.5-pro/
+    --output_path /home/lx/embodied-eval/logs/logs_gemini-2.5-pro/
