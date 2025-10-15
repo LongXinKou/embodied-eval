@@ -12,6 +12,9 @@ pip install flash_attn-2.7.3+cu12torch2.5cxx11abiFALSE-cp310-cp310-linux_x86_64.
 
 ### LLaVA-Next
 ```
+pip install -e git+https://github.com/LLaVA-VL/LLaVA-NeXT@b42941ceba259d5df18f8df8193a3897296a0449#egg=llava
+
+# [Optional] If you want to use the latest version of LLaVA-Next, you can install it from the main branch.
 git clone https://github.com/LLaVA-VL/LLaVA-NeXT.git
 cd LLaVA-NeXT
 pip install -e . --no-deps # llava 1.7.0.dev0 
@@ -20,7 +23,6 @@ pip install -e . --no-deps # llava 1.7.0.dev0
 ### Qwen2.5-VL
 ```
 pip install qwen-vl-utils
-pip install transformers==4.49.0
 ```
 
 ### VILA
@@ -41,6 +43,21 @@ add `chat_template` to tokenizer_config.json of VILA1.5.
 "chat_template": "{% if messages[0]['role'] != 'system' %}{{ '<|im_start|>system\nYou are a helpful assistant<|im_end|>\n' }}{% endif %}{% for message in messages if message['content'] is not none %}{{ '<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n' }}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}",
 "chat_template": "{% for message in messages %}{% if message['role'] == 'user' %}{{ 'USER: ' + message['content'] + ' ' }}{% elif message['role'] == 'assistant' %}{{ 'ASSISTANT: ' + message['content'] + '</s>' }}{% endif %}{% endfor %}{% if add_generation_prompt %}{{ 'ASSISTANT:' }}{% endif %}"
 ```
+
+### RoboAnnotatorX
+need to install `llava` from LLaVA repo.
+```
+pip uninstall llava
+pip install --no-deps llava@git+https://github.com/haotian-liu/LLaVA.git@1619889c712e347be1cb4f78ec66e7cf414ac1a6 # llava-1.1.1
+```
+then you need to install `roboannotator` from the repo.
+```
+git clone https://github.com/LongXinKou/RoboannotatorX.git
+cd RoboannotatorX
+pip install -e . --no-deps # roboannotatorx-1.0
+```
+We recommend users to download the pretrained weights from the following link [EVA-ViT-G](https://storage.googleapis.com/sfr-vision-language-research/LAVIS/models/BLIP2/eva_vit_g.pth)
+and put them in `model_zoo`.
 
 ### robopint
 ```

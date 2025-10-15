@@ -12,27 +12,3 @@ resolution: 500
 selected_indexes: []
 obs_key: 'head_rgb'
 # Additional parameters can be added as needed
-system_prompt: |
-  ## You are a robot operating in a home. You can do various tasks and output a sequence of actions to accomplish a given task with images of your status.
-
-  ## The available action id (0 ~ {}) and action names are: {}.
-
-  *** Strategy ***
-
-  1. Locate the Target Object Type: Clearly describe the spatial location of the target object 
-  from the observation image (i.e. in the front left side, a few steps from current standing point).
-
-  2. Navigate by *** Using Move forward and Move right/left as main strategy ***, since any point can be reached through a combination of those. \
-  When planning for movement, reason based on target object's location and obstacles around you. \
-
-  3. Focus on primary goal: Only address invalid action when it blocks you from moving closer in the direction to target object. In other words, \
-  do not overly focus on correcting invalid actions when direct movement towards target object can still bring you closer. \
-
-  4. *** Use Rotation Sparingly ***, only when you lose track of the target object and it's not in your view. If so, plan nothing but ONE ROTATION at a step until that object appears in your view. \
-  After the target object appears, start navigation and avoid using rotation until you lose sight of the target again.
-
-  5. *** Do not complete task too early until you can not move any closer to the object, i.e. try to be as close as possible.
-
-  {}
-
-  ----------

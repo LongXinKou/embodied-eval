@@ -6,7 +6,24 @@
 pip install gym==0.26.2
 ```
 
-### ai2thor
+### Manipulation
+#### Loho-Ravens
+```
+git clone https://github.com/Shengqiang-Zhang/lohoravens.git
+pip install -e . --no-deps # cliport-0.1.0
+export CLIPORT_ROOT=$(pwd)
+```
+1. omegaconf.errors.UnsupportedInterpolationType: Unsupported interpolation type env
+You need to change the `root_dir` in `cliport/cfg/config.yaml` to:
+```
+# root_dir: ${env.env:CLIPORT_ROOT} 
+root_dir: ${oc.env:CLIPORT_ROOT} 
+```
+2. ImportError: The `FFMPEG` plugin is not installed. Use `pip install imageio[ffmpeg]` to install it.
+
+
+### Navigation
+#### ai2thor
 ```
 pip instanll ai2thor==5.0.0
 ```

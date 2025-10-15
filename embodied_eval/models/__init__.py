@@ -25,8 +25,10 @@ AVAILABLE_MODELS = {
     "spacer": "SpaceR",
     "roboannotatorx": "RoboAnnotatorX",
     "embodiedgpt": "EmbodiedGPT",
+    "embodied_r1": "EmbodiedR1",
     "robopoint": "RoboPoint",
-    "spatialvlm": "SpatialVLM"
+    "spatialvlm": "SpatialVLM",
+    "wall_oss": "Wall_OSS"
 }
 
 class BaseAPIModel(abc.ABC):
