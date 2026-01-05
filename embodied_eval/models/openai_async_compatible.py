@@ -38,8 +38,8 @@ class OpenAIAsyncCompatible(BaseAPIModel):
         super().__init__()
 
         self.async_client = AsyncOpenAI(
-            api_key ="sk-mZKUlpAwtBBQKHg5B5F62eFe2dE94394A61aF79aCeE68c44", 
-            base_url = "https://api.gpt.ge/v1"
+            api_key ="", 
+            base_url = ""
         )
         # url=os.getenv("OPENAI_API_BASE")
         # eval_logger.info(f"Base URL: {self.async_client.base_url}")
