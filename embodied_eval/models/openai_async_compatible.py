@@ -15,7 +15,7 @@ from embodied_eval.common.registry import register_model
 from embodied_eval.models import BaseAPIModel
 
 import asyncio
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI,OpenAI
 
 @register_model("openai_async_compatible")
 class OpenAIAsyncCompatible(BaseAPIModel):
@@ -38,10 +38,12 @@ class OpenAIAsyncCompatible(BaseAPIModel):
         super().__init__()
 
         self.async_client = AsyncOpenAI(
-            api_key = os.getenv("OPENAI_API_KEY"), 
-            base_url = os.getenv("OPENAI_API_BASE")
+            api_key ="sk-mZKUlpAwtBBQKHg5B5F62eFe2dE94394A61aF79aCeE68c44", 
+            base_url = "https://api.gpt.ge/v1"
         )
-
+        # url=os.getenv("OPENAI_API_BASE")
+        # eval_logger.info(f"Base URL: {self.async_client.base_url}")
+        # eval_logger.info(f"Base URL: {url}")
         # Store configuration
         self.model_name_or_path = model_name_or_path
         self.batch_size = int(batch_size)
@@ -57,115 +59,6 @@ class OpenAIAsyncCompatible(BaseAPIModel):
         self.timeout = timeout
         self.max_retries = max_retries
         self.sema = asyncio.Semaphore(5)
-
-
-    def generate_until(self, requests) -> List[str]:
-        progress_bar = tqdm(total=len(requests), disable=(self.rank != 0), desc="Model Responding")
-
-        async def _batch_async():
-            tasks = []
-            for i, reg in enumerate(requests):
-                contexts, gen_kwargs, doc_to_visual, doc_id, task, split = reg.args
-                # 把 index 传入 task 中
-                coro = self._answer_async(contexts, gen_kwargs, doc_to_visual, doc_id, task, split)
-                tasks.append((i, asyncio.create_task(coro)))
-
-            results = [None] * len(tasks)
-            for i, fut in tasks:
-                result = await fut
-                results[i] = result
-                progress_bar.update(1)
-
-            return results
-
-        results = list(asyncio.run(_batch_async()))
-        progress_bar.close()
-        return results
-
-    async def _answer_async(self, contexts, gen_kwargs, doc_to_visual, doc_id, task, split):
-        visual_list = doc_to_visual(self.task_dict[task][split][doc_id]) if split is not None else doc_to_visual(self.task_dict[task][doc_id])
-
-        visual_indices = []
-        imgs = []
-
-        has_index = (
-            isinstance(visual_list, (list, tuple)) and
-            len(visual_list) == 2 and
-            all(isinstance(img, Image.Image) for img in visual_list[0]) and
-            all(isinstance(i, int) for i in visual_list[1])
-        )
-        # has_index = False
-
-        if has_index:
-            imgs.extend(visual_list[0])
-            visual_indices.extend(visual_list[1])
-        else:
-            for visual in visual_list:
-                if isinstance(visual, Image.Image):
-                    img = await asyncio.to_thread(self.encode_image, visual)
-                    imgs.append(img)
-                elif isinstance(visual, str) and (".mp4" in visual or ".avi" in visual):
-                    frames = await asyncio.to_thread(self.encode_video, visual, self.max_frames_num)
-                    imgs.extend(frames)
-
-        payload = {
-            "model": self.model_name_or_path,
-            "messages": []
-        }
-        if self.system_prompt:
-            payload["messages"].append({
-                "role": "system", 
-                "content": {"type": "text", "text": self.system_prompt}
-            })
-
-        content = self.build_message_content(
-            question=contexts,
-            pil_images=imgs,
-            visual_indices=visual_indices
-        )
-
-        payload["messages"].append({
-            "role": "user",
-            "content": content
-        })
-
-        max_new_tokens = gen_kwargs.get("max_new_tokens", self.max_new_tokens)
-        do_sample = gen_kwargs.get("do_sample", self.do_sample)
-        temperature = gen_kwargs.get("temperature", self.temperature)
-        top_p = gen_kwargs.get("top_p", self.top_p)
-        num_beams = gen_kwargs.get("num_beams", self.num_beams)
-        payload["max_tokens"] = max_new_tokens
-        payload["temperature"] = temperature
-
-        if "2.5-pro" in self.model_name_or_path:
-            payload["max_tokens"] = self.max_new_tokens
-
-        if "o1" in self.model_name_or_path or "o3" in self.model_name_or_path or "o4" in self.model_name_or_path:
-            del payload["temperature"]
-            payload["reasoning_effort"] = "medium"
-            payload["response_format"] = {"type": "text"}
-            payload.pop("max_tokens")
-            payload["max_completion_tokens"] = self.max_new_tokens
-        
-        
-        for attempt in range(self.max_retries):
-            try:
-                async with self.sema:
-                    response = await self.async_client.chat.completions.create(**payload)
-                response_text = response.choices[0].message.content
-                break
-            except Exception as e:
-                error_msg = str(e)
-                eval_logger.info(f"Attempt {attempt + 1}/{self.max_retries} failed with error: {error_msg}")
-
-                # On last attempt, log error and set empty response
-                if attempt == self.max_retries - 1:
-                    response_text = ""
-                    eval_logger.error(f"All {self.max_retries} attempts failed. Last error: {error_msg}")
-                else:
-                    await asyncio.sleep(0.5)
-        return response_text
-
 
     def encode_image(self, image: Union[Image.Image, str]):
         max_size = self.max_size_in_mb * 1024 * 1024  # 20MB in bytes
@@ -269,3 +162,113 @@ class OpenAIAsyncCompatible(BaseAPIModel):
                     "image_url": {"url": f"data:image/png;base64,{base64_img}"}
                 })
         return interleaved
+    
+    def _build_payload(self, context, imgs, visual_indices, gen_kwargs):
+        payload = {
+            "model": self.model_name_or_path,
+            "messages": []
+        }
+        if self.system_prompt:
+            payload["messages"].append({
+                "role": "system",
+                "content": {"type": "text", "text": self.system_prompt}
+            })
+
+        content = self.build_message_content(
+            question=context,
+            pil_images=imgs,
+            visual_indices=visual_indices
+        )
+
+        payload["messages"].append({
+            "role": "user",
+            "content": content
+        })
+
+        max_new_tokens = gen_kwargs.get("max_new_tokens", self.max_new_tokens)
+        temperature = gen_kwargs.get("temperature", self.temperature)
+        payload["max_tokens"] = max_new_tokens
+        payload["temperature"] = temperature
+
+        if "2.5-pro" in self.model_name_or_path:
+            payload["max_tokens"] = self.max_new_tokens
+
+        if "o1" in self.model_name_or_path or "o3" in self.model_name_or_path or "o4" in self.model_name_or_path:
+            del payload["temperature"]
+            payload["reasoning_effort"] = "medium"
+            payload["response_format"] = {"type": "text"}
+            payload.pop("max_tokens")
+            payload["max_completion_tokens"] = self.max_new_tokens
+
+        return payload
+
+    def respond(self, context, visuals, **gen_kwargs) -> str:
+        """Generate a single response for the given context and visuals."""
+        async def _run_once():
+            return await self._answer_async(context, visuals, gen_kwargs or {})
+
+        return asyncio.run(_run_once())
+
+    async def _answer_async(self, context, visual_list, gen_kwargs):
+        imgs, visual_indices = await self._prepare_visuals(visual_list)
+        payload = self._build_payload(context, imgs, visual_indices, gen_kwargs)
+
+
+        for attempt in range(self.max_retries):
+            try:
+                async with self.sema:
+                    response = await self.async_client.chat.completions.create(**payload)
+                response_text = response.choices[0].message.content
+                break
+            except httpx.ConnectError as e:
+                error_msg = f"HTTPX Connect Error (Network/DNS): {e}"
+                eval_logger.warning(f"Attempt {attempt + 1}/{self.max_retries} failed with specific error: {error_msg}")
+            except httpx.TimeoutException as e:
+                error_msg = f"HTTPX Timeout Error: {e}"
+                eval_logger.warning(f"Attempt {attempt + 1}/{self.max_retries} failed with specific error: {error_msg}")
+            except Exception as e:
+                # 捕获其他如 APIError, RateLimitError 等
+                error_msg = str(e)
+                eval_logger.warning(f"Attempt {attempt + 1}/{self.max_retries} failed with general error: {error_msg}")
+            # except Exception as e:
+            #     error_msg = str(e)
+            #     eval_logger.info(f"Attempt {attempt + 1}/{self.max_retries} failed with error: {error_msg}")
+
+            #     if attempt == self.max_retries - 1:
+            #         response_text = ""
+            #         eval_logger.error(f"All {self.max_retries} attempts failed. Last error: {error_msg}")
+            #     else:
+            #         await asyncio.sleep(0.5)
+            if attempt == self.max_retries - 1:
+                response_text = ""
+                eval_logger.error(f"All {self.max_retries} attempts failed. Last error: {error_msg}")
+            else:
+                eval_logger.info("Retrying after 0.5s...")
+                await asyncio.sleep(0.5)
+        return response_text
+
+
+    async def _prepare_visuals(self, visual_list):
+        visual_indices = []
+        imgs = []
+
+        has_index = (
+            isinstance(visual_list, (list, tuple)) and
+            len(visual_list) == 2 and
+            all(isinstance(img, Image.Image) for img in visual_list[0]) and
+            all(isinstance(i, int) for i in visual_list[1])
+        )
+
+        if has_index:
+            imgs.extend(visual_list[0])
+            visual_indices.extend(visual_list[1])
+        elif visual_list is not None:
+            for visual in visual_list:
+                if isinstance(visual, Image.Image):
+                    img = await asyncio.to_thread(self.encode_image, visual)
+                    imgs.append(img)
+                elif isinstance(visual, str) and (".mp4" in visual or ".avi" in visual):
+                    frames = await asyncio.to_thread(self.encode_video, visual, self.max_frames_num)
+                    imgs.extend(frames)
+
+        return imgs, visual_indices
